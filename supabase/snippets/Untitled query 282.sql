@@ -1,0 +1,1 @@
+  SELECT public.setup_dni_user_auth('12345678', '12345678', '550e8400-e29b-41d4-a716-446655440002'::uuid);

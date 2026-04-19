@@ -124,7 +124,7 @@ CREATE OR REPLACE FUNCTION "public"."create_auth_user_for_dni"("dni" character v
     LANGUAGE "plpgsql" SECURITY DEFINER
     AS $$
 DECLARE
-  auth_user_id UUID;
+  v_auth_user_id UUID;
   virtual_email TEXT;
 BEGIN
   -- Use provided email or create virtual email for DNI
@@ -163,16 +163,16 @@ BEGIN
     '',
     '',
     ''
-  ) RETURNING id INTO auth_user_id;
+  ) RETURNING id INTO v_auth_user_id;
 
   -- Update users table with auth_user_id and email
-  UPDATE public.users 
-  SET 
-    auth_user_id = auth_user_id,
+  UPDATE public.users
+  SET
+    auth_user_id = v_auth_user_id,
     email = virtual_email
   WHERE user_id = dni;
 
-  RETURN auth_user_id;
+  RETURN v_auth_user_id;
 END;
 $$;
 
@@ -184,12 +184,12 @@ CREATE OR REPLACE FUNCTION "public"."create_auth_user_for_dni"("dni" character v
     LANGUAGE "plpgsql" SECURITY DEFINER
     AS $$
 DECLARE
-  auth_user_id UUID;
+  v_auth_user_id UUID;
   virtual_email TEXT;
   coop_code VARCHAR(50);
 BEGIN
   -- Get cooperative code
-  SELECT get_cooperative_code(cooperative_id) INTO coop_code;
+  SELECT get_cooperative_code($3) INTO coop_code;
 
   -- Use provided email or create virtual email for DNI with cooperative code
   IF user_email IS NULL THEN
@@ -227,16 +227,16 @@ BEGIN
     '',
     '',
     ''
-  ) RETURNING id INTO auth_user_id;
+  ) RETURNING id INTO v_auth_user_id;
 
   -- Update users table with auth_user_id and email
   UPDATE public.users
   SET
-    auth_user_id = auth_user_id,
+    auth_user_id = v_auth_user_id,
     email = virtual_email
-  WHERE user_id = dni AND cooperative_id = cooperative_id;
+  WHERE user_id = dni AND public.users.cooperative_id = $3;
 
-  RETURN auth_user_id;
+  RETURN v_auth_user_id;
 END;
 $$;
 
@@ -342,33 +342,6 @@ COMMENT ON FUNCTION "public"."get_cooperative_code"("coop_id" "uuid") IS 'Return
 
 
 
-CREATE OR REPLACE FUNCTION "public"."get_current_user_cooperative_id"() RETURNS "uuid"
-    LANGUAGE "plpgsql" SECURITY DEFINER
-    AS $$
-BEGIN
-    RETURN (
-        SELECT cooperative_id 
-        FROM public.users 
-        WHERE auth_user_id = auth.uid()
-        LIMIT 1
-    );
-END;
-$$;
-
-
-ALTER FUNCTION "public"."get_current_user_cooperative_id"() OWNER TO "postgres";
-
-
-CREATE OR REPLACE FUNCTION "public"."get_current_web_user_cooperative"() RETURNS "uuid"
-    LANGUAGE "sql" STABLE SECURITY DEFINER
-    AS $$
-    SELECT cooperative_id FROM public.web_users
-    WHERE auth_user_id = auth.uid()
-    LIMIT 1;
-  $$;
-
-
-ALTER FUNCTION "public"."get_current_web_user_cooperative"() OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."get_next_plot_code"("producer_id_param" "uuid") RETURNS "text"
@@ -410,17 +383,6 @@ ALTER FUNCTION "public"."get_next_plot_code"("producer_id_param" "uuid") OWNER T
 COMMENT ON FUNCTION "public"."get_next_plot_code"("producer_id_param" "uuid") IS 'Preview the next available plot code for a producer without incrementing the sequence - SECURITY DEFINER';
 
 
-
-CREATE OR REPLACE FUNCTION "public"."get_web_user_cooperative_id"() RETURNS "uuid"
-    LANGUAGE "sql" STABLE
-    AS $$
-    SELECT cooperative_id FROM public.web_users
-    WHERE auth_user_id = auth.uid()
-    LIMIT 1;
-  $$;
-
-
-ALTER FUNCTION "public"."get_web_user_cooperative_id"() OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."initialize_stock_for_batch"() RETURNS "trigger"
@@ -683,7 +645,7 @@ BEGIN
   -- Check if user exists in users table for this cooperative
   SELECT EXISTS(
     SELECT 1 FROM public.users
-    WHERE user_id = dni AND cooperative_id = cooperative_id
+    WHERE user_id = dni AND public.users.cooperative_id = $3
   ) INTO user_exists;
 
   IF NOT user_exists THEN
@@ -695,7 +657,7 @@ BEGIN
 
   -- Check if user already has auth setup for this cooperative
   SELECT auth_user_id FROM public.users
-  WHERE user_id = dni AND cooperative_id = cooperative_id
+  WHERE user_id = dni AND public.users.cooperative_id = $3
   INTO auth_id;
 
   IF auth_id IS NOT NULL THEN
@@ -1877,6 +1839,28 @@ COMMENT ON COLUMN "public"."equipment_maintenance_records"."updated_at" IS 'Fech
 
 
 
+CREATE TABLE IF NOT EXISTS "public"."form_configurations" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "cooperative_id" "uuid",
+    "step_key" "text" NOT NULL,
+    "fields" "jsonb" NOT NULL DEFAULT '[]'::"jsonb",
+    "is_active" boolean DEFAULT true NOT NULL,
+    "version" integer DEFAULT 1 NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"(),
+    "updated_at" timestamp with time zone DEFAULT "now"()
+);
+
+
+ALTER TABLE "public"."form_configurations" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."form_configurations" IS 'Configuracion de campos de formulario por paso y cooperativa. cooperative_id NULL = config global para todas.';
+
+COMMENT ON COLUMN "public"."form_configurations"."step_key" IS 'Identificador del formulario: calidad, contenedor, despacho, checklist_limpieza, etc.';
+COMMENT ON COLUMN "public"."form_configurations"."fields" IS 'Array JSON de definiciones de campo: [{key, label, type, required, options, min, max, default, order}]';
+COMMENT ON COLUMN "public"."form_configurations"."cooperative_id" IS 'NULL = aplica a todas las cooperativas. UUID = override para cooperativa especifica.';
+
+
 CREATE TABLE IF NOT EXISTS "public"."exit_items" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "exit_registration_id" "uuid" NOT NULL,
@@ -2227,6 +2211,57 @@ CREATE TABLE IF NOT EXISTS "public"."plant_checklists" (
 ALTER TABLE "public"."plant_checklists" OWNER TO "postgres";
 
 
+CREATE TABLE IF NOT EXISTS "public"."plant_order_checklists" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "order_id" "uuid" NOT NULL,
+    "type" "text" NOT NULL,
+    "items" "jsonb" DEFAULT '[]'::"jsonb" NOT NULL,
+    "general_notes" "text",
+    "filled_by" "uuid" NOT NULL,
+    "filled_at" timestamp with time zone DEFAULT "now"(),
+    "cooperative_id" "uuid" NOT NULL,
+    CONSTRAINT "plant_order_checklists_type_check" CHECK (("type" = ANY (ARRAY['limpieza'::"text", 'control_plagas'::"text"])))
+);
+
+
+ALTER TABLE "public"."plant_order_checklists" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."plant_order_checklists" IS 'Checklists a nivel de orden/jornada (limpieza y control de plagas aplican a la planta, no al lote individual)';
+
+
+CREATE TABLE IF NOT EXISTS "public"."plant_dispatches" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "container_id" "uuid" NOT NULL,
+    "dispatch_date" "date" DEFAULT CURRENT_DATE NOT NULL,
+    "dispatch_code" "text" NOT NULL,
+    "loaded_by" "uuid" NOT NULL,
+    "verified_by" "uuid",
+    "total_loaded_kg" numeric(10,3),
+    "seal_verified" boolean DEFAULT false,
+    "temperature_at_load" numeric(5,2),
+    "humidity_at_load" numeric(5,2),
+    "notes" "text",
+    "cooperative_id" "uuid" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"(),
+    "updated_at" timestamp with time zone DEFAULT "now"(),
+    "extra_data" "jsonb" DEFAULT '{}'::"jsonb"
+);
+
+
+ALTER TABLE "public"."plant_dispatches" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."plant_dispatches" IS 'Registro de despacho/embarque vinculado a un contenedor de exportación';
+
+COMMENT ON COLUMN "public"."plant_dispatches"."dispatch_code" IS 'Código único de despacho';
+COMMENT ON COLUMN "public"."plant_dispatches"."loaded_by" IS 'Usuario que supervisó la carga';
+COMMENT ON COLUMN "public"."plant_dispatches"."verified_by" IS 'Usuario que verificó el despacho (opcional)';
+COMMENT ON COLUMN "public"."plant_dispatches"."seal_verified" IS 'Si el sello de seguridad fue verificado al cerrar';
+COMMENT ON COLUMN "public"."plant_dispatches"."temperature_at_load" IS 'Temperatura ambiente al momento de la carga (°C)';
+COMMENT ON COLUMN "public"."plant_dispatches"."humidity_at_load" IS 'Humedad relativa al momento de la carga (%)';
+
+
 CREATE TABLE IF NOT EXISTS "public"."plant_homogenization_inputs" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "plant_batch_id" "uuid" NOT NULL,
@@ -2253,12 +2288,53 @@ CREATE TABLE IF NOT EXISTS "public"."plant_orders" (
     "created_at" timestamp with time zone DEFAULT "now"(),
     "updated_at" timestamp with time zone DEFAULT "now"(),
     "total_kg" numeric(10,3),
+    "extra_data" "jsonb" DEFAULT '{}'::"jsonb",
     CONSTRAINT "chk_po_market_not_empty" CHECK ((TRIM(BOTH FROM "market") <> ''::"text")),
     CONSTRAINT "chk_po_status_valid" CHECK (("status" = ANY (ARRAY['en_proceso'::"text", 'completado'::"text"])))
 );
 
 
 ALTER TABLE "public"."plant_orders" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."plant_containers" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "order_id" "uuid" NOT NULL,
+    "container_number" character varying(20),
+    "seal_number" character varying(30),
+    "container_size" character varying(10) DEFAULT '20'::character varying,
+    "max_capacity_kg" numeric(10,3),
+    "booking_number" character varying(50),
+    "bill_of_lading" character varying(50),
+    "shipping_line" character varying(100),
+    "destination_port" character varying(100),
+    "departure_date" "date",
+    "estimated_arrival" "date",
+    "status" "text" DEFAULT 'preparando'::"text" NOT NULL,
+    "notes" "text",
+    "cooperative_id" "uuid" NOT NULL,
+    "created_by" "uuid" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"(),
+    "updated_at" timestamp with time zone DEFAULT "now"(),
+    "extra_data" "jsonb" DEFAULT '{}'::"jsonb",
+    CONSTRAINT "plant_containers_status_check" CHECK (("status" = ANY (ARRAY['preparando'::"text", 'cargado'::"text", 'despachado'::"text", 'en_transito'::"text", 'entregado'::"text"])))
+);
+
+
+ALTER TABLE "public"."plant_containers" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."plant_containers" IS 'Contenedores de exportación vinculados 1:1 con órdenes de producción';
+
+
+COMMENT ON COLUMN "public"."plant_containers"."container_number" IS 'Número del contenedor físico (ej: BLU-1234567)';
+COMMENT ON COLUMN "public"."plant_containers"."seal_number" IS 'Número de sello de seguridad';
+COMMENT ON COLUMN "public"."plant_containers"."container_size" IS 'Tamaño del contenedor: 20 o 40 (pies)';
+COMMENT ON COLUMN "public"."plant_containers"."max_capacity_kg" IS 'Capacidad máxima del contenedor en kg';
+COMMENT ON COLUMN "public"."plant_containers"."booking_number" IS 'Número de reserva con la naviera';
+COMMENT ON COLUMN "public"."plant_containers"."bill_of_lading" IS 'Conocimiento de embarque (BL)';
+COMMENT ON COLUMN "public"."plant_containers"."shipping_line" IS 'Nombre de la naviera';
+COMMENT ON COLUMN "public"."plant_containers"."destination_port" IS 'Puerto de destino';
 
 
 CREATE TABLE IF NOT EXISTS "public"."plant_production_batches" (
@@ -2873,16 +2949,24 @@ CREATE TABLE IF NOT EXISTS "public"."quality_evaluations" (
     "appearance" character varying(20),
     "notes" "text",
     "created_at" timestamp with time zone DEFAULT "now"(),
+    "approval_status" character varying(30) DEFAULT NULL,
+    "rejection_reason" "text",
+    "extra_data" "jsonb" DEFAULT '{}'::"jsonb",
     CONSTRAINT "quality_evaluations_appearance_check" CHECK ((("appearance")::"text" = ANY ((ARRAY['suelta'::character varying, 'seca'::character varying, 'cerosa'::character varying])::"text"[]))),
     CONSTRAINT "quality_evaluations_color_check" CHECK ((("color")::"text" = ANY ((ARRAY['amarillo claro'::character varying, 'amarillo oscuro'::character varying, 'verde'::character varying, 'marron claro'::character varying, 'marron
   oscuro'::character varying])::"text"[]))),
     CONSTRAINT "quality_evaluations_humidity_pct_check" CHECK ((("humidity_pct" >= (0)::numeric) AND ("humidity_pct" <= (100)::numeric))),
     CONSTRAINT "quality_evaluations_impurities_pct_check" CHECK ((("impurities_pct" >= (0)::numeric) AND ("impurities_pct" <= (100)::numeric))),
-    CONSTRAINT "quality_evaluations_sack_condition_check" CHECK ((("sack_condition")::"text" = ANY ((ARRAY['buena'::character varying, 'regular'::character varying, 'mala'::character varying])::"text"[])))
+    CONSTRAINT "quality_evaluations_sack_condition_check" CHECK ((("sack_condition")::"text" = ANY ((ARRAY['buena'::character varying, 'regular'::character varying, 'mala'::character varying])::"text"[]))),
+    CONSTRAINT "quality_evaluations_approval_status_check" CHECK (("approval_status" IS NULL OR ("approval_status")::"text" = ANY ((ARRAY['aprobado'::character varying, 'rechazado'::character varying, 'aprobado_con_observaciones'::character varying])::"text"[])))
 );
 
 
 ALTER TABLE "public"."quality_evaluations" OWNER TO "postgres";
+
+
+COMMENT ON COLUMN "public"."quality_evaluations"."approval_status" IS 'Estado de aprobación post-evaluación: aprobado, rechazado, aprobado_con_observaciones (NULL = pendiente de aprobación)';
+COMMENT ON COLUMN "public"."quality_evaluations"."rejection_reason" IS 'Motivo del rechazo (requerido cuando approval_status = rechazado)';
 
 
 CREATE TABLE IF NOT EXISTS "public"."stowage_transport_inspections" (
@@ -3218,6 +3302,16 @@ ALTER TABLE ONLY "public"."equipment_maintenance_records"
 
 
 
+ALTER TABLE ONLY "public"."form_configurations"
+    ADD CONSTRAINT "form_configurations_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."form_configurations"
+    ADD CONSTRAINT "form_configurations_cooperative_step_key" UNIQUE ("cooperative_id", "step_key");
+
+
+
 ALTER TABLE ONLY "public"."exit_items"
     ADD CONSTRAINT "exit_items_pkey" PRIMARY KEY ("id");
 
@@ -3310,6 +3404,36 @@ ALTER TABLE ONLY "public"."plant_orders"
 
 ALTER TABLE ONLY "public"."plant_orders"
     ADD CONSTRAINT "plant_orders_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."plant_containers"
+    ADD CONSTRAINT "plant_containers_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."plant_containers"
+    ADD CONSTRAINT "plant_containers_order_id_key" UNIQUE ("order_id");
+
+
+
+ALTER TABLE ONLY "public"."plant_order_checklists"
+    ADD CONSTRAINT "plant_order_checklists_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."plant_order_checklists"
+    ADD CONSTRAINT "plant_order_checklists_order_id_type_key" UNIQUE ("order_id", "type");
+
+
+
+ALTER TABLE ONLY "public"."plant_dispatches"
+    ADD CONSTRAINT "plant_dispatches_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."plant_dispatches"
+    ADD CONSTRAINT "plant_dispatches_dispatch_code_key" UNIQUE ("dispatch_code");
 
 
 
@@ -4328,6 +4452,11 @@ ALTER TABLE ONLY "public"."equipment_maintenance_records"
 
 
 
+ALTER TABLE ONLY "public"."form_configurations"
+    ADD CONSTRAINT "form_configurations_cooperative_id_fkey" FOREIGN KEY ("cooperative_id") REFERENCES "public"."cooperatives"("id") ON DELETE CASCADE;
+
+
+
 ALTER TABLE ONLY "public"."exit_items"
     ADD CONSTRAINT "exit_items_cooperative_id_fkey" FOREIGN KEY ("cooperative_id") REFERENCES "public"."cooperatives"("id") ON DELETE RESTRICT;
 
@@ -4445,6 +4574,21 @@ ALTER TABLE ONLY "public"."plant_homogenization_inputs"
 
 ALTER TABLE ONLY "public"."plant_production_batches"
     ADD CONSTRAINT "plant_production_batches_order_id_fkey" FOREIGN KEY ("order_id") REFERENCES "public"."plant_orders"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."plant_containers"
+    ADD CONSTRAINT "plant_containers_order_id_fkey" FOREIGN KEY ("order_id") REFERENCES "public"."plant_orders"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."plant_order_checklists"
+    ADD CONSTRAINT "plant_order_checklists_order_id_fkey" FOREIGN KEY ("order_id") REFERENCES "public"."plant_orders"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."plant_dispatches"
+    ADD CONSTRAINT "plant_dispatches_container_id_fkey" FOREIGN KEY ("container_id") REFERENCES "public"."plant_containers"("id") ON DELETE CASCADE;
 
 
 
@@ -4598,1074 +4742,6 @@ ALTER TABLE ONLY "public"."worker_controls"
 
 
 
-CREATE POLICY "Authenticated users can insert worker_control_items" ON "public"."worker_control_items" FOR INSERT TO "authenticated" WITH CHECK ((EXISTS ( SELECT 1
-   FROM "public"."worker_controls" "wc"
-  WHERE ("wc"."id" = "worker_control_items"."worker_control_id"))));
-
-
-
-CREATE POLICY "Authenticated users can select worker_control_items" ON "public"."worker_control_items" FOR SELECT TO "authenticated" USING ((EXISTS ( SELECT 1
-   FROM "public"."worker_controls" "wc"
-  WHERE ("wc"."id" = "worker_control_items"."worker_control_id"))));
-
-
-
-CREATE POLICY "Service role can manage all batch certificates" ON "public"."batch_certs" USING ((("auth"."jwt"() ->> 'role'::"text") = 'service_role'::"text"));
-
-
-
-CREATE POLICY "Service role can manage all certificate exclusion groups" ON "public"."certificate_exclusion_groups" USING ((("auth"."jwt"() ->> 'role'::"text") = 'service_role'::"text"));
-
-
-
-CREATE POLICY "Service role can manage all coop_modules" ON "public"."coop_modules" USING ((("auth"."jwt"() ->> 'role'::"text") = 'service_role'::"text"));
-
-
-
-CREATE POLICY "Service role can manage all cooperatives" ON "public"."cooperatives" USING ((("auth"."jwt"() ->> 'role'::"text") = 'service_role'::"text"));
-
-
-
-CREATE POLICY "Service role can manage all environment inspection items" ON "public"."environment_inspection_items" USING ((("auth"."jwt"() ->> 'role'::"text") = 'service_role'::"text"));
-
-
-
-CREATE POLICY "Service role can manage all environment inspections" ON "public"."environment_inspections" USING ((("auth"."jwt"() ->> 'role'::"text") = 'service_role'::"text"));
-
-
-
-CREATE POLICY "Service role can manage all exit items" ON "public"."exit_items" USING ((("auth"."jwt"() ->> 'role'::"text") = 'service_role'::"text"));
-
-
-
-CREATE POLICY "Service role can manage all exit registrations" ON "public"."exit_registrations" USING ((("auth"."jwt"() ->> 'role'::"text") = 'service_role'::"text"));
-
-
-
-CREATE POLICY "Service role can manage all health incidents" ON "public"."health_incidents" USING ((("auth"."jwt"() ->> 'role'::"text") = 'service_role'::"text"));
-
-
-
-CREATE POLICY "Service role can manage all inventory stock" ON "public"."inventory_stock" USING ((("auth"."jwt"() ->> 'role'::"text") = 'service_role'::"text"));
-
-
-
-CREATE POLICY "Service role can manage all plots" ON "public"."plots" USING ((("auth"."jwt"() ->> 'role'::"text") = 'service_role'::"text"));
-
-
-
-CREATE POLICY "Service role can manage all producers" ON "public"."producers" USING ((("auth"."jwt"() ->> 'role'::"text") = 'service_role'::"text"));
-
-
-
-CREATE POLICY "Service role can manage all stowage transport inspections" ON "public"."stowage_transport_inspections" USING ((("auth"."jwt"() ->> 'role'::"text") = 'service_role'::"text"));
-
-
-
-CREATE POLICY "Service role can manage all users" ON "public"."users" USING ((("auth"."jwt"() ->> 'role'::"text") = 'service_role'::"text"));
-
-
-
-CREATE POLICY "Service role can manage users" ON "public"."users" USING ((("auth"."jwt"() ->> 'role'::"text") = 'service_role'::"text"));
-
-
-
-CREATE POLICY "Service role has full access to equipment maintenance records" ON "public"."equipment_maintenance_records" TO "service_role" USING (true) WITH CHECK (true);
-
-
-
-CREATE POLICY "Service role has full access to product returns" ON "public"."product_returns" TO "service_role" USING (true) WITH CHECK (true);
-
-
-
-CREATE POLICY "Service role has full access to worker control records" ON "public"."worker_controls" TO "service_role" USING (true) WITH CHECK (true);
-
-
-
-CREATE POLICY "Users can create bait records for their controls" ON "public"."pest_control_bait_records" FOR INSERT WITH CHECK (("pest_control_id" IN ( SELECT "pest_controls"."id"
-   FROM "public"."pest_controls"
-  WHERE ("pest_controls"."created_by" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can create chlorine controls for their cooperative" ON "public"."chlorine_residual_controls" FOR INSERT WITH CHECK (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can create cleaning items for their records" ON "public"."cleaning_disinfection_items" FOR INSERT WITH CHECK (("cleaning_disinfection_id" IN ( SELECT "cleaning_disinfections"."id"
-   FROM "public"."cleaning_disinfections"
-  WHERE ("cleaning_disinfections"."created_by" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can create cleaning records for their cooperative" ON "public"."cleaning_disinfections" FOR INSERT WITH CHECK (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can create insect records for their controls" ON "public"."pest_control_insect_records" FOR INSERT WITH CHECK (("pest_control_id" IN ( SELECT "pest_controls"."id"
-   FROM "public"."pest_controls"
-  WHERE ("pest_controls"."created_by" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can create pest controls for their cooperative" ON "public"."pest_controls" FOR INSERT WITH CHECK (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can delete bait records from their own controls" ON "public"."pest_control_bait_records" FOR DELETE USING (("pest_control_id" IN ( SELECT "pest_controls"."id"
-   FROM "public"."pest_controls"
-  WHERE ("pest_controls"."created_by" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can delete batch temperatures from their cooperative" ON "public"."batch_temperatures" FOR DELETE USING (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can delete certificates from same cooperative" ON "public"."batch_certs" FOR DELETE USING (("cooperative_id" IN ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can delete environment inspection items from their cooper" ON "public"."environment_inspection_items" FOR DELETE USING ((EXISTS ( SELECT 1
-   FROM "public"."environment_inspections"
-  WHERE (("environment_inspections"."id" = "environment_inspection_items"."environment_inspection_id") AND ("environment_inspections"."cooperative_id" = ( SELECT "users"."cooperative_id"
-           FROM "public"."users"
-          WHERE ("users"."auth_user_id" = "auth"."uid"())))))));
-
-
-
-CREATE POLICY "Users can delete environment inspections from their cooperative" ON "public"."environment_inspections" FOR DELETE USING (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can delete equipment maintenance records" ON "public"."equipment_maintenance_records" FOR DELETE USING (("cooperative_id" IN ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can delete exclusion groups from same cooperative" ON "public"."certificate_exclusion_groups" FOR DELETE USING (("cooperative_id" IN ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can delete exit items from their cooperative" ON "public"."exit_items" FOR DELETE USING (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can delete exit registrations from their cooperative" ON "public"."exit_registrations" FOR DELETE USING (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can delete health incidents from their cooperative" ON "public"."health_incidents" FOR DELETE USING (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can delete insect records from their own controls" ON "public"."pest_control_insect_records" FOR DELETE USING (("pest_control_id" IN ( SELECT "pest_controls"."id"
-   FROM "public"."pest_controls"
-  WHERE ("pest_controls"."created_by" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can delete items from their own records" ON "public"."cleaning_disinfection_items" FOR DELETE USING (("cleaning_disinfection_id" IN ( SELECT "cleaning_disinfections"."id"
-   FROM "public"."cleaning_disinfections"
-  WHERE ("cleaning_disinfections"."created_by" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can delete modules from their cooperative" ON "public"."coop_modules" FOR DELETE USING (("cooperative_id" IN ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can delete pH controls from their cooperative" ON "public"."batch_ph_controls" FOR DELETE USING (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can delete plots from their cooperative producers" ON "public"."plots" FOR DELETE USING (("producer_id" IN ( SELECT "producers"."id"
-   FROM "public"."producers"
-  WHERE ("producers"."cooperative_id" IN ( SELECT "users"."cooperative_id"
-           FROM "public"."users"
-          WHERE ("users"."auth_user_id" = "auth"."uid"()))))));
-
-
-
-CREATE POLICY "Users can delete producers from their cooperative" ON "public"."producers" FOR DELETE USING (("cooperative_id" IN ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can delete product returns" ON "public"."product_returns" FOR DELETE USING (("cooperative_id" IN ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can delete production batch certs from their cooperative" ON "public"."production_batch_certs" FOR DELETE USING (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can delete production batches from their cooperative" ON "public"."production_batches" FOR DELETE USING (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can delete stowage transport inspections from their coope" ON "public"."stowage_transport_inspections" FOR DELETE USING (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can delete their own chlorine controls" ON "public"."chlorine_residual_controls" FOR DELETE USING (("created_by" = "auth"."uid"()));
-
-
-
-CREATE POLICY "Users can delete their own cleaning records" ON "public"."cleaning_disinfections" FOR DELETE USING (("created_by" = "auth"."uid"()));
-
-
-
-CREATE POLICY "Users can delete their own pest controls" ON "public"."pest_controls" FOR DELETE USING (("created_by" = "auth"."uid"()));
-
-
-
-CREATE POLICY "Users can delete worker control records" ON "public"."worker_controls" FOR DELETE USING (("cooperative_id" IN ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can insert batch temperatures for their cooperative" ON "public"."batch_temperatures" FOR INSERT WITH CHECK (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can insert certificates for their cooperative" ON "public"."batch_certs" FOR INSERT WITH CHECK (("cooperative_id" IN ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can insert environment inspection items for their coopera" ON "public"."environment_inspection_items" FOR INSERT WITH CHECK ((EXISTS ( SELECT 1
-   FROM "public"."environment_inspections"
-  WHERE (("environment_inspections"."id" = "environment_inspection_items"."environment_inspection_id") AND ("environment_inspections"."cooperative_id" = ( SELECT "users"."cooperative_id"
-           FROM "public"."users"
-          WHERE ("users"."auth_user_id" = "auth"."uid"())))))));
-
-
-
-CREATE POLICY "Users can insert environment inspections for their cooperative" ON "public"."environment_inspections" FOR INSERT WITH CHECK ((("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))) AND (("created_by")::"text" = (( SELECT "users"."user_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"())))::"text")));
-
-
-
-CREATE POLICY "Users can insert equipment maintenance records" ON "public"."equipment_maintenance_records" FOR INSERT WITH CHECK ((("cooperative_id" IN ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))) AND (("created_by")::"text" IN ( SELECT "users"."user_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"())))));
-
-
-
-CREATE POLICY "Users can insert exclusion groups for their cooperative" ON "public"."certificate_exclusion_groups" FOR INSERT WITH CHECK (("cooperative_id" IN ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can insert exit items for their cooperative" ON "public"."exit_items" FOR INSERT WITH CHECK (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can insert exit registrations for their cooperative" ON "public"."exit_registrations" FOR INSERT WITH CHECK ((("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))) AND (("created_by")::"text" = (( SELECT "users"."user_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"())))::"text")));
-
-
-
-CREATE POLICY "Users can insert health incidents for their cooperative" ON "public"."health_incidents" FOR INSERT WITH CHECK ((("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))) AND (("created_by")::"text" = (( SELECT "users"."user_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"())))::"text")));
-
-
-
-CREATE POLICY "Users can insert inventory stock for their cooperative" ON "public"."inventory_stock" FOR INSERT WITH CHECK (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can insert modules for their cooperative" ON "public"."coop_modules" FOR INSERT WITH CHECK (("cooperative_id" IN ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can insert pH controls for their cooperative" ON "public"."batch_ph_controls" FOR INSERT WITH CHECK (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can insert plots for their cooperative producers" ON "public"."plots" FOR INSERT WITH CHECK (("producer_id" IN ( SELECT "producers"."id"
-   FROM "public"."producers"
-  WHERE ("producers"."cooperative_id" IN ( SELECT "users"."cooperative_id"
-           FROM "public"."users"
-          WHERE ("users"."auth_user_id" = "auth"."uid"()))))));
-
-
-
-CREATE POLICY "Users can insert producers for their cooperative" ON "public"."producers" FOR INSERT WITH CHECK (("cooperative_id" IN ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can insert product returns" ON "public"."product_returns" FOR INSERT WITH CHECK ((("cooperative_id" IN ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))) AND (("created_by")::"text" IN ( SELECT "users"."user_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"())))));
-
-
-
-CREATE POLICY "Users can insert production batch certs for their cooperative" ON "public"."production_batch_certs" FOR INSERT WITH CHECK (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can insert production batches for their cooperative" ON "public"."production_batches" FOR INSERT WITH CHECK (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can insert stowage transport inspections for their cooper" ON "public"."stowage_transport_inspections" FOR INSERT WITH CHECK ((("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))) AND (("created_by")::"text" = (( SELECT "users"."user_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"())))::"text")));
-
-
-
-CREATE POLICY "Users can insert worker control records" ON "public"."worker_controls" FOR INSERT WITH CHECK ((("cooperative_id" IN ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))) AND (("created_by")::"text" IN ( SELECT "users"."user_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"())))));
-
-
-
-CREATE POLICY "Users can update bait records in their own controls" ON "public"."pest_control_bait_records" FOR UPDATE USING (("pest_control_id" IN ( SELECT "pest_controls"."id"
-   FROM "public"."pest_controls"
-  WHERE ("pest_controls"."created_by" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can update batch temperatures from their cooperative" ON "public"."batch_temperatures" FOR UPDATE USING (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"())))) WITH CHECK (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can update certificates from same cooperative" ON "public"."batch_certs" FOR UPDATE USING (("cooperative_id" IN ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can update environment inspection items from their cooper" ON "public"."environment_inspection_items" FOR UPDATE USING ((EXISTS ( SELECT 1
-   FROM "public"."environment_inspections"
-  WHERE (("environment_inspections"."id" = "environment_inspection_items"."environment_inspection_id") AND ("environment_inspections"."cooperative_id" = ( SELECT "users"."cooperative_id"
-           FROM "public"."users"
-          WHERE ("users"."auth_user_id" = "auth"."uid"())))))));
-
-
-
-CREATE POLICY "Users can update environment inspections from their cooperative" ON "public"."environment_inspections" FOR UPDATE USING (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"())))) WITH CHECK (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can update equipment maintenance records" ON "public"."equipment_maintenance_records" FOR UPDATE USING (("cooperative_id" IN ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can update exclusion groups from same cooperative" ON "public"."certificate_exclusion_groups" FOR UPDATE USING (("cooperative_id" IN ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can update exit items from their cooperative" ON "public"."exit_items" FOR UPDATE USING (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"())))) WITH CHECK (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can update exit registrations from their cooperative" ON "public"."exit_registrations" FOR UPDATE USING (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"())))) WITH CHECK (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can update health incidents from their cooperative" ON "public"."health_incidents" FOR UPDATE USING (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"())))) WITH CHECK (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can update insect records in their own controls" ON "public"."pest_control_insect_records" FOR UPDATE USING (("pest_control_id" IN ( SELECT "pest_controls"."id"
-   FROM "public"."pest_controls"
-  WHERE ("pest_controls"."created_by" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can update inventory stock from their cooperative" ON "public"."inventory_stock" FOR UPDATE USING (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"())))) WITH CHECK (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can update items in their own records" ON "public"."cleaning_disinfection_items" FOR UPDATE USING (("cleaning_disinfection_id" IN ( SELECT "cleaning_disinfections"."id"
-   FROM "public"."cleaning_disinfections"
-  WHERE ("cleaning_disinfections"."created_by" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can update modules from their cooperative" ON "public"."coop_modules" FOR UPDATE USING (("cooperative_id" IN ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"())))) WITH CHECK (("cooperative_id" IN ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can update pH controls from their cooperative" ON "public"."batch_ph_controls" FOR UPDATE USING (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"())))) WITH CHECK (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can update plots from their cooperative producers" ON "public"."plots" FOR UPDATE USING (("producer_id" IN ( SELECT "producers"."id"
-   FROM "public"."producers"
-  WHERE ("producers"."cooperative_id" IN ( SELECT "users"."cooperative_id"
-           FROM "public"."users"
-          WHERE ("users"."auth_user_id" = "auth"."uid"())))))) WITH CHECK (("producer_id" IN ( SELECT "producers"."id"
-   FROM "public"."producers"
-  WHERE ("producers"."cooperative_id" IN ( SELECT "users"."cooperative_id"
-           FROM "public"."users"
-          WHERE ("users"."auth_user_id" = "auth"."uid"()))))));
-
-
-
-CREATE POLICY "Users can update producers from their cooperative" ON "public"."producers" FOR UPDATE USING (("cooperative_id" IN ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"())))) WITH CHECK (("cooperative_id" IN ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can update product returns" ON "public"."product_returns" FOR UPDATE USING (("cooperative_id" IN ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can update production batch certs from their cooperative" ON "public"."production_batch_certs" FOR UPDATE USING (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"())))) WITH CHECK (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can update production batches from their cooperative" ON "public"."production_batches" FOR UPDATE USING (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"())))) WITH CHECK (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can update stowage transport inspections from their coope" ON "public"."stowage_transport_inspections" FOR UPDATE USING (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"())))) WITH CHECK (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can update their own chlorine controls" ON "public"."chlorine_residual_controls" FOR UPDATE USING (("created_by" = "auth"."uid"())) WITH CHECK (("created_by" = "auth"."uid"()));
-
-
-
-CREATE POLICY "Users can update their own cleaning records" ON "public"."cleaning_disinfections" FOR UPDATE USING (("created_by" = "auth"."uid"())) WITH CHECK (("created_by" = "auth"."uid"()));
-
-
-
-CREATE POLICY "Users can update their own pest controls" ON "public"."pest_controls" FOR UPDATE USING (("created_by" = "auth"."uid"())) WITH CHECK (("created_by" = "auth"."uid"()));
-
-
-
-CREATE POLICY "Users can update their own record" ON "public"."users" FOR UPDATE USING (("auth_user_id" = "auth"."uid"()));
-
-
-
-CREATE POLICY "Users can update worker control records" ON "public"."worker_controls" FOR UPDATE USING (("cooperative_id" IN ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can view bait records from their cooperative" ON "public"."pest_control_bait_records" FOR SELECT USING (("pest_control_id" IN ( SELECT "pest_controls"."id"
-   FROM "public"."pest_controls"
-  WHERE ("pest_controls"."cooperative_id" = ( SELECT "users"."cooperative_id"
-           FROM "public"."users"
-          WHERE ("users"."auth_user_id" = "auth"."uid"()))))));
-
-
-
-CREATE POLICY "Users can view batch temperatures from their cooperative" ON "public"."batch_temperatures" FOR SELECT USING (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can view certificates from same cooperative" ON "public"."batch_certs" FOR SELECT USING (("cooperative_id" IN ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can view chlorine controls from their cooperative" ON "public"."chlorine_residual_controls" FOR SELECT USING (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can view cleaning items from their cooperative" ON "public"."cleaning_disinfection_items" FOR SELECT USING (("cleaning_disinfection_id" IN ( SELECT "cleaning_disinfections"."id"
-   FROM "public"."cleaning_disinfections"
-  WHERE ("cleaning_disinfections"."cooperative_id" = ( SELECT "users"."cooperative_id"
-           FROM "public"."users"
-          WHERE ("users"."auth_user_id" = "auth"."uid"()))))));
-
-
-
-CREATE POLICY "Users can view cleaning records from their cooperative" ON "public"."cleaning_disinfections" FOR SELECT USING (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can view environment inspection items from their cooperat" ON "public"."environment_inspection_items" FOR SELECT USING ((EXISTS ( SELECT 1
-   FROM "public"."environment_inspections"
-  WHERE (("environment_inspections"."id" = "environment_inspection_items"."environment_inspection_id") AND ("environment_inspections"."cooperative_id" = ( SELECT "users"."cooperative_id"
-           FROM "public"."users"
-          WHERE ("users"."auth_user_id" = "auth"."uid"())))))));
-
-
-
-CREATE POLICY "Users can view environment inspections from their cooperative" ON "public"."environment_inspections" FOR SELECT USING (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can view equipment maintenance records" ON "public"."equipment_maintenance_records" FOR SELECT USING (("cooperative_id" IN ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can view exclusion groups from same cooperative" ON "public"."certificate_exclusion_groups" FOR SELECT USING (("cooperative_id" IN ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can view exit items from their cooperative" ON "public"."exit_items" FOR SELECT USING (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can view exit registrations from their cooperative" ON "public"."exit_registrations" FOR SELECT USING (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can view health incidents from their cooperative" ON "public"."health_incidents" FOR SELECT USING (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can view insect records from their cooperative" ON "public"."pest_control_insect_records" FOR SELECT USING (("pest_control_id" IN ( SELECT "pest_controls"."id"
-   FROM "public"."pest_controls"
-  WHERE ("pest_controls"."cooperative_id" = ( SELECT "users"."cooperative_id"
-           FROM "public"."users"
-          WHERE ("users"."auth_user_id" = "auth"."uid"()))))));
-
-
-
-CREATE POLICY "Users can view inventory stock from their cooperative" ON "public"."inventory_stock" FOR SELECT USING (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can view modules from their cooperative" ON "public"."coop_modules" FOR SELECT USING (("cooperative_id" IN ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can view pH controls from their cooperative" ON "public"."batch_ph_controls" FOR SELECT USING (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can view pest controls from their cooperative" ON "public"."pest_controls" FOR SELECT USING (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can view plots from their cooperative producers" ON "public"."plots" FOR SELECT USING (("producer_id" IN ( SELECT "producers"."id"
-   FROM "public"."producers"
-  WHERE ("producers"."cooperative_id" IN ( SELECT "users"."cooperative_id"
-           FROM "public"."users"
-          WHERE ("users"."auth_user_id" = "auth"."uid"()))))));
-
-
-
-CREATE POLICY "Users can view producers from their cooperative" ON "public"."producers" FOR SELECT USING (("cooperative_id" IN ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can view product returns" ON "public"."product_returns" FOR SELECT USING (("cooperative_id" IN ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can view production batch certs from their cooperative" ON "public"."production_batch_certs" FOR SELECT USING (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can view production batches from their cooperative" ON "public"."production_batches" FOR SELECT USING (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can view stowage transport inspections from their coopera" ON "public"."stowage_transport_inspections" FOR SELECT USING (("cooperative_id" = ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can view their own cooperative" ON "public"."cooperatives" FOR SELECT USING (("id" IN ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Users can view users from same cooperative" ON "public"."users" FOR SELECT USING (("cooperative_id" = "public"."get_current_user_cooperative_id"()));
-
-
-
-CREATE POLICY "Users can view worker control records" ON "public"."worker_controls" FOR SELECT USING (("cooperative_id" IN ( SELECT "users"."cooperative_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "Web users can view coop_modules" ON "public"."coop_modules" FOR SELECT TO "authenticated" USING (("cooperative_id" IN ( SELECT "web_users"."cooperative_id"
-   FROM "public"."web_users"
-  WHERE ("web_users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "admin_sistema_full_access" ON "public"."user_module_assignments" TO "authenticated" USING ((EXISTS ( SELECT 1
-   FROM "public"."users" "u"
-  WHERE ((("u"."user_id")::"text" = (( SELECT "users"."user_id"
-           FROM "public"."users"
-          WHERE ("users"."auth_user_id" = "auth"."uid"())
-         LIMIT 1))::"text") AND ("u"."cooperative_id" = "user_module_assignments"."cooperative_id") AND ("u"."role" = 'admin_sistema'::"text"))))) WITH CHECK ((EXISTS ( SELECT 1
-   FROM "public"."users" "u"
-  WHERE ((("u"."user_id")::"text" = (( SELECT "users"."user_id"
-           FROM "public"."users"
-          WHERE ("users"."auth_user_id" = "auth"."uid"())
-         LIMIT 1))::"text") AND ("u"."cooperative_id" = "user_module_assignments"."cooperative_id") AND ("u"."role" = 'admin_sistema'::"text")))));
-
-
-
-CREATE POLICY "admin_web_select_all_users" ON "public"."web_users" FOR SELECT TO "authenticated" USING (("cooperative_id" = "public"."get_current_web_user_cooperative"()));
-
-
-
-CREATE POLICY "auth users plant_batch_processing" ON "public"."plant_batch_processing" TO "authenticated" USING (("cooperative_id" IN ( SELECT "web_users"."cooperative_id"
-   FROM "public"."web_users"
-  WHERE ("web_users"."auth_user_id" = "auth"."uid"())))) WITH CHECK (("cooperative_id" IN ( SELECT "web_users"."cooperative_id"
-   FROM "public"."web_users"
-  WHERE ("web_users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "auth users plant_checklists" ON "public"."plant_checklists" TO "authenticated" USING (("cooperative_id" IN ( SELECT "web_users"."cooperative_id"
-   FROM "public"."web_users"
-  WHERE ("web_users"."auth_user_id" = "auth"."uid"())))) WITH CHECK (("cooperative_id" IN ( SELECT "web_users"."cooperative_id"
-   FROM "public"."web_users"
-  WHERE ("web_users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "auth users plant_homogenization_inputs" ON "public"."plant_homogenization_inputs" TO "authenticated" USING (("cooperative_id" IN ( SELECT "web_users"."cooperative_id"
-   FROM "public"."web_users"
-  WHERE ("web_users"."auth_user_id" = "auth"."uid"())))) WITH CHECK (("cooperative_id" IN ( SELECT "web_users"."cooperative_id"
-   FROM "public"."web_users"
-  WHERE ("web_users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "auth users plant_orders" ON "public"."plant_orders" TO "authenticated" USING (("cooperative_id" IN ( SELECT "web_users"."cooperative_id"
-   FROM "public"."web_users"
-  WHERE ("web_users"."auth_user_id" = "auth"."uid"())))) WITH CHECK (("cooperative_id" IN ( SELECT "web_users"."cooperative_id"
-   FROM "public"."web_users"
-  WHERE ("web_users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "auth users plant_production_batches" ON "public"."plant_production_batches" TO "authenticated" USING (("cooperative_id" IN ( SELECT "web_users"."cooperative_id"
-   FROM "public"."web_users"
-  WHERE ("web_users"."auth_user_id" = "auth"."uid"())))) WITH CHECK (("cooperative_id" IN ( SELECT "web_users"."cooperative_id"
-   FROM "public"."web_users"
-  WHERE ("web_users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-ALTER TABLE "public"."batch_certs" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."batch_ph_controls" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."batch_temperatures" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."certificate_exclusion_groups" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."chlorine_residual_controls" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."cleaning_disinfection_items" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."cleaning_disinfections" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."coop_modules" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."cooperatives" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."environment_inspection_items" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."environment_inspections" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."equipment_maintenance_records" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."exit_items" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."exit_reception_items" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."exit_receptions" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."exit_registrations" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."health_incidents" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."inventory_stock" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."pest_control_bait_records" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."pest_control_insect_records" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."pest_controls" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."plant_batch_processing" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."plant_checklists" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."plant_homogenization_inputs" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."plant_orders" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."plant_production_batches" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."plots" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."producers" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."product_returns" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."production_batch_certs" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."production_batches" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."quality_evaluations" ENABLE ROW LEVEL SECURITY;
-
-
-CREATE POLICY "read_own_assignments" ON "public"."user_module_assignments" FOR SELECT TO "authenticated" USING ((("user_id")::"text" = (( SELECT "users"."user_id"
-   FROM "public"."users"
-  WHERE ("users"."auth_user_id" = "auth"."uid"())
- LIMIT 1))::"text"));
-
-
-
-ALTER TABLE "public"."stowage_transport_inspections" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."user_module_assignments" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."users" ENABLE ROW LEVEL SECURITY;
-
-
-CREATE POLICY "web_user_insert_quality" ON "public"."quality_evaluations" FOR INSERT TO "authenticated" WITH CHECK (("cooperative_id" = "public"."get_current_web_user_cooperative"()));
-
-
-
-CREATE POLICY "web_user_insert_reception_items" ON "public"."exit_reception_items" FOR INSERT TO "authenticated" WITH CHECK (("exit_reception_id" IN ( SELECT "exit_receptions"."id"
-   FROM "public"."exit_receptions"
-  WHERE ("exit_receptions"."cooperative_id" = "public"."get_current_web_user_cooperative"()))));
-
-
-
-CREATE POLICY "web_user_insert_receptions" ON "public"."exit_receptions" FOR INSERT TO "authenticated" WITH CHECK (("cooperative_id" = "public"."get_current_web_user_cooperative"()));
-
-
-
-CREATE POLICY "web_user_select_batch_certs" ON "public"."production_batch_certs" FOR SELECT TO "authenticated" USING (("production_batch_id" IN ( SELECT "ei"."production_batch_id"
-   FROM ((("public"."exit_items" "ei"
-     JOIN "public"."exit_registrations" "er" ON (("er"."id" = "ei"."exit_registration_id")))
-     JOIN "public"."cooperatives" "c" ON (((("c"."name")::"text" = ("er"."destination")::"text") OR (("c"."code")::"text" = ("er"."destination")::"text"))))
-     JOIN "public"."web_users" "w" ON (("w"."cooperative_id" = "c"."id")))
-  WHERE ("w"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "web_user_select_batches" ON "public"."production_batches" FOR SELECT TO "authenticated" USING (("id" IN ( SELECT "ei"."production_batch_id"
-   FROM ((("public"."exit_items" "ei"
-     JOIN "public"."exit_registrations" "er" ON (("er"."id" = "ei"."exit_registration_id")))
-     JOIN "public"."cooperatives" "c" ON (((("c"."name")::"text" = ("er"."destination")::"text") OR (("c"."code")::"text" = ("er"."destination")::"text"))))
-     JOIN "public"."web_users" "w" ON (("w"."cooperative_id" = "c"."id")))
-  WHERE ("w"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "web_user_select_cooperative" ON "public"."cooperatives" FOR SELECT TO "authenticated" USING (("id" IN ( SELECT "web_users"."cooperative_id"
-   FROM "public"."web_users"
-  WHERE ("web_users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "web_user_select_exit_items" ON "public"."exit_items" FOR SELECT TO "authenticated" USING (("exit_registration_id" IN ( SELECT "er"."id"
-   FROM (("public"."exit_registrations" "er"
-     JOIN "public"."cooperatives" "c" ON (((("c"."name")::"text" = ("er"."destination")::"text") OR (("c"."code")::"text" = ("er"."destination")::"text"))))
-     JOIN "public"."web_users" "w" ON (("w"."cooperative_id" = "c"."id")))
-  WHERE ("w"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "web_user_select_exits" ON "public"."exit_registrations" FOR SELECT TO "authenticated" USING ((("destination")::"text" IN ( SELECT "c"."name"
-   FROM ("public"."cooperatives" "c"
-     JOIN "public"."web_users" "w" ON (("w"."cooperative_id" = "c"."id")))
-  WHERE ("w"."auth_user_id" = "auth"."uid"())
-UNION
- SELECT "c"."code"
-   FROM ("public"."cooperatives" "c"
-     JOIN "public"."web_users" "w" ON (("w"."cooperative_id" = "c"."id")))
-  WHERE ("w"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "web_user_select_own" ON "public"."web_users" FOR SELECT TO "authenticated" USING (("auth_user_id" = "auth"."uid"()));
-
-
-
-CREATE POLICY "web_user_select_ph_controls" ON "public"."batch_ph_controls" FOR SELECT TO "authenticated" USING (("production_batch_id" IN ( SELECT "ei"."production_batch_id"
-   FROM ((("public"."exit_items" "ei"
-     JOIN "public"."exit_registrations" "er" ON (("er"."id" = "ei"."exit_registration_id")))
-     JOIN "public"."cooperatives" "c" ON (((("c"."name")::"text" = ("er"."destination")::"text") OR (("c"."code")::"text" = ("er"."destination")::"text"))))
-     JOIN "public"."web_users" "w" ON (("w"."cooperative_id" = "c"."id")))
-  WHERE ("w"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "web_user_select_plots" ON "public"."plots" FOR SELECT TO "authenticated" USING (("id" IN ( SELECT "pb"."plot_id"
-   FROM (((("public"."production_batches" "pb"
-     JOIN "public"."exit_items" "ei" ON (("ei"."production_batch_id" = "pb"."id")))
-     JOIN "public"."exit_registrations" "er" ON (("er"."id" = "ei"."exit_registration_id")))
-     JOIN "public"."cooperatives" "c" ON (((("c"."name")::"text" = ("er"."destination")::"text") OR (("c"."code")::"text" = ("er"."destination")::"text"))))
-     JOIN "public"."web_users" "w" ON (("w"."cooperative_id" = "c"."id")))
-  WHERE (("w"."auth_user_id" = "auth"."uid"()) AND ("pb"."plot_id" IS NOT NULL)))));
-
-
-
-CREATE POLICY "web_user_select_producers" ON "public"."producers" FOR SELECT TO "authenticated" USING (("id" IN ( SELECT "pb"."producer_id"
-   FROM (((("public"."production_batches" "pb"
-     JOIN "public"."exit_items" "ei" ON (("ei"."production_batch_id" = "pb"."id")))
-     JOIN "public"."exit_registrations" "er" ON (("er"."id" = "ei"."exit_registration_id")))
-     JOIN "public"."cooperatives" "c" ON (((("c"."name")::"text" = ("er"."destination")::"text") OR (("c"."code")::"text" = ("er"."destination")::"text"))))
-     JOIN "public"."web_users" "w" ON (("w"."cooperative_id" = "c"."id")))
-  WHERE ("w"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "web_user_select_quality" ON "public"."quality_evaluations" FOR SELECT TO "authenticated" USING (("cooperative_id" = "public"."get_current_web_user_cooperative"()));
-
-
-
-CREATE POLICY "web_user_select_reception_items" ON "public"."exit_reception_items" FOR SELECT TO "authenticated" USING (("exit_reception_id" IN ( SELECT "exit_receptions"."id"
-   FROM "public"."exit_receptions"
-  WHERE ("exit_receptions"."cooperative_id" = "public"."get_current_web_user_cooperative"()))));
-
-
-
-CREATE POLICY "web_user_select_receptions" ON "public"."exit_receptions" FOR SELECT TO "authenticated" USING (("cooperative_id" = "public"."get_current_web_user_cooperative"()));
-
-
-
-CREATE POLICY "web_user_select_temperatures" ON "public"."batch_temperatures" FOR SELECT TO "authenticated" USING (("production_batch_id" IN ( SELECT "ei"."production_batch_id"
-   FROM ((("public"."exit_items" "ei"
-     JOIN "public"."exit_registrations" "er" ON (("er"."id" = "ei"."exit_registration_id")))
-     JOIN "public"."cooperatives" "c" ON (((("c"."name")::"text" = ("er"."destination")::"text") OR (("c"."code")::"text" = ("er"."destination")::"text"))))
-     JOIN "public"."web_users" "w" ON (("w"."cooperative_id" = "c"."id")))
-  WHERE ("w"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "web_user_service_all" ON "public"."web_users" USING ((("auth"."jwt"() ->> 'role'::"text") = 'service_role'::"text"));
-
-
-
-ALTER TABLE "public"."web_users" ENABLE ROW LEVEL SECURITY;
-
-
-CREATE POLICY "web_users_read_batch_certs" ON "public"."batch_certs" FOR SELECT TO "authenticated" USING (("cooperative_id" IN ( SELECT "web_users"."cooperative_id"
-   FROM "public"."web_users"
-  WHERE ("web_users"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "web_users_read_stowage_inspections" ON "public"."stowage_transport_inspections" FOR SELECT TO "authenticated" USING (("exit_registration_id" IN ( SELECT "er"."id"
-   FROM (("public"."exit_registrations" "er"
-     JOIN "public"."cooperatives" "c" ON (((("c"."name")::"text" = ("er"."destination")::"text") OR (("c"."code")::"text" = ("er"."destination")::"text"))))
-     JOIN "public"."web_users" "w" ON (("w"."cooperative_id" = "c"."id")))
-  WHERE ("w"."auth_user_id" = "auth"."uid"()))));
-
-
-
-CREATE POLICY "web_users_read_worker_controls" ON "public"."worker_controls" FOR SELECT TO "authenticated" USING (("production_batch_id" IN ( SELECT "ei"."production_batch_id"
-   FROM ((("public"."exit_items" "ei"
-     JOIN "public"."exit_registrations" "er" ON (("er"."id" = "ei"."exit_registration_id")))
-     JOIN "public"."cooperatives" "c" ON (((("c"."name")::"text" = ("er"."destination")::"text") OR (("c"."code")::"text" = ("er"."destination")::"text"))))
-     JOIN "public"."web_users" "w" ON (("w"."cooperative_id" = "c"."id")))
-  WHERE ("w"."auth_user_id" = "auth"."uid"()))));
-
-
-
-ALTER TABLE "public"."worker_control_items" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."worker_controls" ENABLE ROW LEVEL SECURITY;
 
 
 
@@ -5872,27 +4948,9 @@ GRANT ALL ON FUNCTION "public"."get_cooperative_code"("coop_id" "uuid") TO "serv
 
 
 
-GRANT ALL ON FUNCTION "public"."get_current_user_cooperative_id"() TO "anon";
-GRANT ALL ON FUNCTION "public"."get_current_user_cooperative_id"() TO "authenticated";
-GRANT ALL ON FUNCTION "public"."get_current_user_cooperative_id"() TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."get_current_web_user_cooperative"() TO "anon";
-GRANT ALL ON FUNCTION "public"."get_current_web_user_cooperative"() TO "authenticated";
-GRANT ALL ON FUNCTION "public"."get_current_web_user_cooperative"() TO "service_role";
-
-
-
 GRANT ALL ON FUNCTION "public"."get_next_plot_code"("producer_id_param" "uuid") TO "anon";
 GRANT ALL ON FUNCTION "public"."get_next_plot_code"("producer_id_param" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."get_next_plot_code"("producer_id_param" "uuid") TO "service_role";
-
-
-
-GRANT ALL ON FUNCTION "public"."get_web_user_cooperative_id"() TO "anon";
-GRANT ALL ON FUNCTION "public"."get_web_user_cooperative_id"() TO "authenticated";
-GRANT ALL ON FUNCTION "public"."get_web_user_cooperative_id"() TO "service_role";
 
 
 
@@ -6103,6 +5161,10 @@ GRANT ALL ON FUNCTION "public"."validate_worker_control"() TO "service_role";
 
 
 
+-- VIEWS: Se crearán en security.sql después del seed
+
+
+
 GRANT ALL ON TABLE "public"."batch_certs" TO "anon";
 GRANT ALL ON TABLE "public"."batch_certs" TO "authenticated";
 GRANT ALL ON TABLE "public"."batch_certs" TO "service_role";
@@ -6172,6 +5234,12 @@ GRANT ALL ON TABLE "public"."environment_inspections" TO "service_role";
 GRANT ALL ON TABLE "public"."equipment_maintenance_records" TO "anon";
 GRANT ALL ON TABLE "public"."equipment_maintenance_records" TO "authenticated";
 GRANT ALL ON TABLE "public"."equipment_maintenance_records" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."form_configurations" TO "anon";
+GRANT ALL ON TABLE "public"."form_configurations" TO "authenticated";
+GRANT ALL ON TABLE "public"."form_configurations" TO "service_role";
 
 
 
@@ -6256,6 +5324,24 @@ GRANT ALL ON TABLE "public"."plant_orders" TO "service_role";
 GRANT ALL ON TABLE "public"."plant_production_batches" TO "anon";
 GRANT ALL ON TABLE "public"."plant_production_batches" TO "authenticated";
 GRANT ALL ON TABLE "public"."plant_production_batches" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."plant_containers" TO "anon";
+GRANT ALL ON TABLE "public"."plant_containers" TO "authenticated";
+GRANT ALL ON TABLE "public"."plant_containers" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."plant_order_checklists" TO "anon";
+GRANT ALL ON TABLE "public"."plant_order_checklists" TO "authenticated";
+GRANT ALL ON TABLE "public"."plant_order_checklists" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."plant_dispatches" TO "anon";
+GRANT ALL ON TABLE "public"."plant_dispatches" TO "authenticated";
+GRANT ALL ON TABLE "public"."plant_dispatches" TO "service_role";
 
 
 

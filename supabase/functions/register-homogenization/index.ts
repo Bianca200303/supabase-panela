@@ -9,10 +9,33 @@ serve(async (req)=>{
     headers: corsHeaders
   });
   try {
+    // ── 0. Verificar autenticación ───────────────────────────────────────────
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader) return error(401, 'No autorizado');
+
     const supabase = createClient(Deno.env.get('SUPABASE_URL'), Deno.env.get('SUPABASE_SERVICE_ROLE_KEY'));
+
+    // Verify caller identity via JWT
+    const callerClient = createClient(Deno.env.get('SUPABASE_URL'), Deno.env.get('SUPABASE_ANON_KEY'), {
+      global: { headers: { Authorization: authHeader } }
+    });
+    const { data: { user: callerUser }, error: callerAuthError } = await callerClient.auth.getUser();
+    if (callerAuthError || !callerUser) return error(401, 'Token inválido');
+
     const { plant_batch_id, inputs, cooperative_id } = await req.json();
+
+    // Verify caller belongs to the declared cooperative
+    const { data: callerProfile } = await supabase
+      .from('web_users')
+      .select('cooperative_id')
+      .eq('auth_user_id', callerUser.id)
+      .single();
+    if (!callerProfile || callerProfile.cooperative_id !== cooperative_id) {
+      return error(403, 'No tienes acceso a esta cooperativa');
+    }
+
     // ── 1. Validar que el lote de planta existe ──────────────────────────────
-    const { data: plantBatch, error: batchErr } = await supabase.from('plant_production_batches').select('id, unit_weight_kg, planned_quantity, status').eq('id', plant_batch_id).single();
+    const { data: plantBatch, error: batchErr } = await supabase.from('plant_production_batches').select('id, unit_weight_kg, planned_quantity, status, cooperative_id').eq('id', plant_batch_id).eq('cooperative_id', cooperative_id).single();
     if (batchErr || !plantBatch) return error(404, 'El lote de producción no existe');
     if (plantBatch.status === 'procesado') return error(400, 'El lote ya fue procesado y no puede modificarse');
     // ── 2. Validar que los inputs tienen kg > 0 ──────────────────────────────

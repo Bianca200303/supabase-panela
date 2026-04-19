@@ -45,7 +45,7 @@ serve(async (req)=>{
       });
     }
     // Verify caller is admin_sistema
-    const { data: callerProfile } = await supabaseAdmin.from('users').select('role').eq('auth_user_id', callerUser.id).single();
+    const { data: callerProfile } = await supabaseAdmin.from('users').select('role, cooperative_id').eq('auth_user_id', callerUser.id).single();
     if (callerProfile?.role !== 'admin_sistema') {
       return new Response(JSON.stringify({
         error: 'Solo el administrador del sistema puede cambiar roles'
@@ -58,6 +58,15 @@ serve(async (req)=>{
       });
     }
     const { userId, newRole, cooperativeId } = await req.json();
+    // Verify caller belongs to the same cooperative as the target user
+    if (callerProfile?.cooperative_id !== cooperativeId) {
+      return new Response(JSON.stringify({
+        error: 'No puedes cambiar roles de usuarios de otra cooperativa'
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 403
+      });
+    }
     if (!userId || !newRole || !cooperativeId) {
       return new Response(JSON.stringify({
         error: 'userId, newRole y cooperativeId son requeridos'

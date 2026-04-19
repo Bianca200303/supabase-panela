@@ -49,13 +49,13 @@ serve(async (req)=>{
       });
     }
     // Verify caller has admin role
-    const { data: callerProfileByAuthId } = await supabaseAdmin.from('users').select('role').eq('auth_user_id', callerUser.id).single();
+    const { data: callerProfileByAuthId } = await supabaseAdmin.from('users').select('role, cooperative_id').eq('auth_user_id', callerUser.id).single();
     // Fallback: extract DNI from virtual email (format: DNI.COOPCODE@dni.local)
     let callerProfile = callerProfileByAuthId;
     if (!callerProfile && callerUser.email) {
       const dniFromEmail = callerUser.email.split('.')[0];
       if (/^\d{8}$/.test(dniFromEmail)) {
-        const { data: profileByDni } = await supabaseAdmin.from('users').select('role').eq('user_id', dniFromEmail).eq('cooperative_id', cooperativeId).single();
+        const { data: profileByDni } = await supabaseAdmin.from('users').select('role, cooperative_id').eq('user_id', dniFromEmail).eq('cooperative_id', cooperativeId).single();
         callerProfile = profileByDni;
       }
     }
@@ -68,6 +68,15 @@ serve(async (req)=>{
           ...corsHeaders,
           'Content-Type': 'application/json'
         },
+        status: 403
+      });
+    }
+    // Verify caller belongs to the same cooperative they are registering into
+    if (callerProfile?.cooperative_id !== cooperativeId) {
+      return new Response(JSON.stringify({
+        error: 'No puedes registrar usuarios en otra cooperativa'
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 403
       });
     }
