@@ -15,14 +15,11 @@
 -- ============================================================================
 -- SECCIÓN 1: COLUMNAS DE UBICACIÓN EN production_batches
 -- ============================================================================
-ALTER TABLE public.production_batches
-  ADD COLUMN IF NOT EXISTS latitude double precision,
-  ADD COLUMN IF NOT EXISTS longitude double precision,
-  ADD COLUMN IF NOT EXISTS location_text text;
-
 COMMENT ON COLUMN public.production_batches.latitude IS 'GPS latitude del registro (nullable)';
 COMMENT ON COLUMN public.production_batches.longitude IS 'GPS longitude del registro (nullable)';
 COMMENT ON COLUMN public.production_batches.location_text IS 'Ubicación ingresada manualmente si falla el GPS (nullable)';
+COMMENT ON COLUMN public.production_batches.observations IS 'Observaciones opcionales capturadas en campo, editables en planta';
+COMMENT ON COLUMN public.production_batches.registered_by_user_id IS 'DNI del admin/técnico que registró el lote (seteado automáticamente por trigger)';
 
 
 -- ============================================================================
@@ -138,6 +135,8 @@ DECLARE
   tbl text;
   coop_tables text[] := ARRAY[
     'batch_certs',
+    'formatos_control_produccion_mp',
+    'formatos_control_ph_temperatura',
     'batch_ph_controls',
     'batch_temperatures',
     'certificate_exclusion_groups',
@@ -202,6 +201,31 @@ END $$;
 -- ============================================================================
 -- SECCIÓN 5: POLÍTICAS ESPECIALES (tablas sin cooperative_id directo)
 -- ============================================================================
+
+-- formatos_control_produccion_mp_lotes: hereda cooperative_id del formato padre
+ALTER TABLE public.formatos_control_produccion_mp_lotes ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY fcmp_lotes_select ON public.formatos_control_produccion_mp_lotes
+  FOR SELECT TO authenticated
+  USING (EXISTS (
+    SELECT 1 FROM public.formatos_control_produccion_mp f WHERE f.id = formato_id
+      AND (f.cooperative_id = public.auth_cooperative_id() OR public.is_service_role())
+  ));
+
+CREATE POLICY fcmp_lotes_insert ON public.formatos_control_produccion_mp_lotes
+  FOR INSERT TO authenticated
+  WITH CHECK (EXISTS (
+    SELECT 1 FROM public.formatos_control_produccion_mp f WHERE f.id = formato_id
+      AND (f.cooperative_id = public.auth_cooperative_id() OR public.is_service_role())
+  ));
+
+CREATE POLICY fcmp_lotes_delete ON public.formatos_control_produccion_mp_lotes
+  FOR DELETE TO authenticated
+  USING (EXISTS (
+    SELECT 1 FROM public.formatos_control_produccion_mp f WHERE f.id = formato_id
+      AND (f.cooperative_id = public.auth_cooperative_id() OR public.is_service_role())
+  ));
+
 
 -- form_configurations: usuario ve configs globales (NULL) + su cooperativa
 ALTER TABLE public.form_configurations ENABLE ROW LEVEL SECURITY;
