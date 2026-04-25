@@ -1657,7 +1657,8 @@ CREATE TABLE IF NOT EXISTS "public"."coop_modules" (
     "cooperative_id" "uuid" NOT NULL,
     "created_at" timestamp with time zone DEFAULT "now"(),
     "updated_at" timestamp with time zone DEFAULT "now"(),
-    "is_active" boolean DEFAULT true
+    "is_active" boolean DEFAULT true,
+    "default_density" double precision DEFAULT 1.08
 );
 
 
