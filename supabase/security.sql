@@ -135,8 +135,11 @@ DECLARE
   tbl text;
   coop_tables text[] := ARRAY[
     'batch_certs',
-    'formatos_control_produccion_mp',
-    'formatos_control_ph_temperatura',
+    'formatos_control_cloro',
+    'formatos_control_mp_ph',
+    'formatos_control_personal',
+    'formatos_control_plagas',
+    'formatos_inspeccion_ambientes',
     'batch_ph_controls',
     'batch_temperatures',
     'certificate_exclusion_groups',
@@ -202,27 +205,27 @@ END $$;
 -- SECCIÓN 5: POLÍTICAS ESPECIALES (tablas sin cooperative_id directo)
 -- ============================================================================
 
--- formatos_control_produccion_mp_lotes: hereda cooperative_id del formato padre
-ALTER TABLE public.formatos_control_produccion_mp_lotes ENABLE ROW LEVEL SECURITY;
+-- formatos_control_mp_ph_lotes: hereda cooperative_id del formato padre
+ALTER TABLE public.formatos_control_mp_ph_lotes ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY fcmp_lotes_select ON public.formatos_control_produccion_mp_lotes
+CREATE POLICY fcmptph_lotes_select ON public.formatos_control_mp_ph_lotes
   FOR SELECT TO authenticated
   USING (EXISTS (
-    SELECT 1 FROM public.formatos_control_produccion_mp f WHERE f.id = formato_id
+    SELECT 1 FROM public.formatos_control_mp_ph f WHERE f.id = formato_id
       AND (f.cooperative_id = public.auth_cooperative_id() OR public.is_service_role())
   ));
 
-CREATE POLICY fcmp_lotes_insert ON public.formatos_control_produccion_mp_lotes
+CREATE POLICY fcmptph_lotes_insert ON public.formatos_control_mp_ph_lotes
   FOR INSERT TO authenticated
   WITH CHECK (EXISTS (
-    SELECT 1 FROM public.formatos_control_produccion_mp f WHERE f.id = formato_id
+    SELECT 1 FROM public.formatos_control_mp_ph f WHERE f.id = formato_id
       AND (f.cooperative_id = public.auth_cooperative_id() OR public.is_service_role())
   ));
 
-CREATE POLICY fcmp_lotes_delete ON public.formatos_control_produccion_mp_lotes
+CREATE POLICY fcmptph_lotes_delete ON public.formatos_control_mp_ph_lotes
   FOR DELETE TO authenticated
   USING (EXISTS (
-    SELECT 1 FROM public.formatos_control_produccion_mp f WHERE f.id = formato_id
+    SELECT 1 FROM public.formatos_control_mp_ph f WHERE f.id = formato_id
       AND (f.cooperative_id = public.auth_cooperative_id() OR public.is_service_role())
   ));
 
@@ -450,7 +453,7 @@ LEFT JOIN (
     FROM plant_homogenization_inputs
     GROUP BY plant_batch_id
 ) phi_agg ON phi_agg.plant_batch_id = ppb.id
-LEFT JOIN plant_containers pc ON pc.order_id = po.id
+LEFT JOIN plant_containers pc ON pc.id = po.container_id
 GROUP BY po.id, po.order_code, po.market, po.total_kg, po.status, po.planned_date,
          pc.container_number, pc.status, pc.bill_of_lading, pc.destination_port,
          po.cooperative_id;

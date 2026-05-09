@@ -80,6 +80,44 @@ CREATE TYPE "public"."vehicle_condition_enum" AS ENUM (
 ALTER TYPE "public"."vehicle_condition_enum" OWNER TO "postgres";
 
 
+-- ============================================================================
+-- FUNCIONES BASE DE SEGURIDAD
+-- Deben estar antes de cualquier política RLS que las use.
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION public.auth_cooperative_id()
+RETURNS uuid
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT NULLIF(
+    current_setting('request.jwt.claims', true)::jsonb ->> 'cooperative_id',
+    ''
+  )::uuid
+$$;
+
+COMMENT ON FUNCTION public.auth_cooperative_id() IS
+  'Retorna cooperative_id del JWT. NULL si no está autenticado o no tiene cooperativa.';
+
+GRANT EXECUTE ON FUNCTION public.auth_cooperative_id() TO anon, authenticated, service_role;
+
+
+CREATE OR REPLACE FUNCTION public.is_service_role()
+RETURNS boolean
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT coalesce(
+    current_setting('request.jwt.claims', true)::jsonb ->> 'role' = 'service_role',
+    false
+  )
+$$;
+
+GRANT EXECUTE ON FUNCTION public.is_service_role() TO anon, authenticated, service_role;
+
+-- ============================================================================
+
+
 CREATE OR REPLACE FUNCTION "public"."auto_assign_plot_code"() RETURNS "trigger"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -1577,9 +1615,6 @@ CREATE TABLE IF NOT EXISTS "public"."cleaning_disinfection_items" (
     "area_code" character varying(50) NOT NULL,
     "point_code" character varying(50) NOT NULL,
     "point_description" "text" NOT NULL,
-    "is_daily_cleaning" boolean DEFAULT true NOT NULL,
-    "is_general_cleaning" boolean DEFAULT true NOT NULL,
-    "is_deep_cleaning" boolean DEFAULT true NOT NULL,
     "uses_chlorine" boolean DEFAULT true NOT NULL,
     "uses_detergent" boolean DEFAULT true NOT NULL,
     "uses_other_product" boolean DEFAULT true NOT NULL,
@@ -1592,7 +1627,7 @@ CREATE TABLE IF NOT EXISTS "public"."cleaning_disinfection_items" (
 ALTER TABLE "public"."cleaning_disinfection_items" OWNER TO "postgres";
 
 
-COMMENT ON TABLE "public"."cleaning_disinfection_items" IS 'Child table storing individual cleaning points. Each record represents one cleaning point from one area. All boolean fields default to TRUE (inverse logic - assume done unless unchecked).';
+COMMENT ON TABLE "public"."cleaning_disinfection_items" IS 'Child table storing individual cleaning points. Each record represents one cleaning point from one area.';
 
 
 
@@ -1601,18 +1636,6 @@ COMMENT ON COLUMN "public"."cleaning_disinfection_items"."area_code" IS 'Area co
 
 
 COMMENT ON COLUMN "public"."cleaning_disinfection_items"."point_code" IS 'Point code within the area (e.g., walls, floors, equipment). See CleaningPointTemplates in Flutter models.';
-
-
-
-COMMENT ON COLUMN "public"."cleaning_disinfection_items"."is_daily_cleaning" IS 'DEFAULT TRUE: Assume daily cleaning was performed unless explicitly unchecked.';
-
-
-
-COMMENT ON COLUMN "public"."cleaning_disinfection_items"."is_general_cleaning" IS 'DEFAULT TRUE: Assume general cleaning was performed unless explicitly unchecked.';
-
-
-
-COMMENT ON COLUMN "public"."cleaning_disinfection_items"."is_deep_cleaning" IS 'DEFAULT TRUE: Assume deep cleaning was performed unless explicitly unchecked.';
 
 
 
@@ -1633,17 +1656,20 @@ CREATE TABLE IF NOT EXISTS "public"."cleaning_disinfections" (
     "cooperative_id" "uuid" NOT NULL,
     "coop_module_id" "uuid" NOT NULL,
     "cleaning_date" "date" NOT NULL,
+    "cleaning_types" "text"[] NOT NULL,
     "general_observations" "text",
     "created_by" "uuid" NOT NULL,
     "created_at" timestamp with time zone DEFAULT "now"(),
-    "updated_at" timestamp with time zone DEFAULT "now"()
+    "updated_at" timestamp with time zone DEFAULT "now"(),
+    CONSTRAINT "cleaning_disinfections_types_chk" CHECK (cleaning_types <@ ARRAY['daily','general','deep']::text[] AND array_length(cleaning_types, 1) > 0),
+    CONSTRAINT "cleaning_disinfections_module_date_key" UNIQUE (coop_module_id, cleaning_date)
 );
 
 
 ALTER TABLE "public"."cleaning_disinfections" OWNER TO "postgres";
 
 
-COMMENT ON TABLE "public"."cleaning_disinfections" IS 'Parent table for daily cleaning and disinfection records. One record per module per day.';
+COMMENT ON TABLE "public"."cleaning_disinfections" IS 'Parent table for cleaning and disinfection sessions. One record per module per day. cleaning_types stores which types were performed (daily, general, deep).';
 
 
 
@@ -2289,6 +2315,7 @@ CREATE TABLE IF NOT EXISTS "public"."plant_orders" (
     "created_at" timestamp with time zone DEFAULT "now"(),
     "updated_at" timestamp with time zone DEFAULT "now"(),
     "total_kg" numeric(10,3),
+    "container_id" "uuid",
     "extra_data" "jsonb" DEFAULT '{}'::"jsonb",
     CONSTRAINT "chk_po_market_not_empty" CHECK ((TRIM(BOTH FROM "market") <> ''::"text")),
     CONSTRAINT "chk_po_status_valid" CHECK (("status" = ANY (ARRAY['en_proceso'::"text", 'completado'::"text"])))
@@ -2300,7 +2327,6 @@ ALTER TABLE "public"."plant_orders" OWNER TO "postgres";
 
 CREATE TABLE IF NOT EXISTS "public"."plant_containers" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
-    "order_id" "uuid" NOT NULL,
     "container_number" character varying(20),
     "seal_number" character varying(30),
     "container_size" character varying(10) DEFAULT '20'::character varying,
@@ -2325,7 +2351,7 @@ CREATE TABLE IF NOT EXISTS "public"."plant_containers" (
 ALTER TABLE "public"."plant_containers" OWNER TO "postgres";
 
 
-COMMENT ON TABLE "public"."plant_containers" IS 'Contenedores de exportación vinculados 1:1 con órdenes de producción';
+COMMENT ON TABLE "public"."plant_containers" IS 'Contenedores de exportación. Cada orden apunta al contenedor que la contiene (plant_orders.container_id).';
 
 
 COMMENT ON COLUMN "public"."plant_containers"."container_number" IS 'Número del contenedor físico (ej: BLU-1234567)';
@@ -3418,8 +3444,8 @@ ALTER TABLE ONLY "public"."plant_containers"
 
 
 
-ALTER TABLE ONLY "public"."plant_containers"
-    ADD CONSTRAINT "plant_containers_order_id_key" UNIQUE ("order_id");
+ALTER TABLE ONLY "public"."plant_orders"
+    ADD CONSTRAINT "plant_orders_container_id_fkey" FOREIGN KEY ("container_id") REFERENCES "public"."plant_containers"("id") ON DELETE SET NULL;
 
 
 
@@ -3513,7 +3539,7 @@ COMMENT ON CONSTRAINT "unique_cert_per_cooperative" ON "public"."batch_certs" IS
 
 
 ALTER TABLE ONLY "public"."producers"
-    ADD CONSTRAINT "unique_dni_per_cooperative" UNIQUE ("dni", "cooperative_id");
+    ADD CONSTRAINT "unique_dni_per_module" UNIQUE ("dni", "coop_module_id");
 
 
 
@@ -4571,8 +4597,6 @@ ALTER TABLE ONLY "public"."plant_production_batches"
 
 
 
-ALTER TABLE ONLY "public"."plant_containers"
-    ADD CONSTRAINT "plant_containers_order_id_fkey" FOREIGN KEY ("order_id") REFERENCES "public"."plant_orders"("id") ON DELETE CASCADE;
 
 
 
@@ -4738,6 +4762,126 @@ ALTER TABLE ONLY "public"."worker_controls"
 
 
 
+
+
+-- =============================================
+-- HIGIENE DE PERSONAL (WEB - PLANTA)
+-- =============================================
+
+CREATE TABLE IF NOT EXISTS "public"."plant_hygiene_areas" (
+    "id"             uuid DEFAULT gen_random_uuid() NOT NULL,
+    "cooperative_id" uuid NOT NULL,
+    "control_date"   date NOT NULL DEFAULT CURRENT_DATE,
+    "area_code"      text NOT NULL,
+    "observations"   text,
+    "created_by"     uuid NOT NULL,
+    "created_at"     timestamp with time zone DEFAULT now() NOT NULL,
+    "updated_at"     timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT "plant_hygiene_areas_area_code_check" CHECK (area_code IN ('TH', 'ENV'))
+);
+
+ALTER TABLE "public"."plant_hygiene_areas" OWNER TO "postgres";
+
+COMMENT ON TABLE "public"."plant_hygiene_areas" IS 'Registro de higiene de personal por area evaluada (web). TH=Tamizado y Homogenizado, ENV=Envasado. Una fila por area por fecha por cooperativa.';
+COMMENT ON COLUMN "public"."plant_hygiene_areas"."area_code" IS 'TH: Tamizado y Homogenizado | ENV: Envasado';
+COMMENT ON COLUMN "public"."plant_hygiene_areas"."control_date" IS 'Fecha del registro de higiene. Libre: no esta vinculada obligatoriamente a un lote de envasado.';
+COMMENT ON COLUMN "public"."plant_hygiene_areas"."created_by" IS 'web_users.id del usuario web que creo el registro';
+
+
+CREATE TABLE IF NOT EXISTS "public"."plant_hygiene_workers" (
+    "id"              uuid DEFAULT gen_random_uuid() NOT NULL,
+    "hygiene_area_id" uuid NOT NULL,
+    "cooperative_id"  uuid NOT NULL,
+    "worker_name"     text NOT NULL,
+    "created_at"      timestamp with time zone DEFAULT now() NOT NULL
+);
+
+ALTER TABLE "public"."plant_hygiene_workers" OWNER TO "postgres";
+
+COMMENT ON TABLE "public"."plant_hygiene_workers" IS 'Trabajador evaluado dentro de un area de higiene. Una fila por trabajador por area.';
+COMMENT ON COLUMN "public"."plant_hygiene_workers"."worker_name" IS 'Nombre del trabajador ingresado manualmente';
+
+
+CREATE TABLE IF NOT EXISTS "public"."plant_hygiene_worker_criteria" (
+    "id"         uuid DEFAULT gen_random_uuid() NOT NULL,
+    "worker_id"  uuid NOT NULL,
+    "item_code"  text NOT NULL,
+    "complies"   boolean NOT NULL DEFAULT true,
+    "created_at" timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT "plant_hygiene_worker_criteria_item_code_check" CHECK (item_code IN (
+        'vestimenta_adecuada',
+        'sin_maquillaje',
+        'unas_cortas_limpias',
+        'sin_joyas',
+        'cabello_corto',
+        'cabello_recogido',
+        'afeitado',
+        'sin_heridas_expuestas'
+    ))
+);
+
+ALTER TABLE "public"."plant_hygiene_worker_criteria" OWNER TO "postgres";
+
+COMMENT ON TABLE "public"."plant_hygiene_worker_criteria" IS 'Criterio de higiene evaluado por trabajador. TH: vestimenta_adecuada, sin_maquillaje, unas_cortas_limpias, sin_joyas. ENV: cabello_corto, cabello_recogido, afeitado, sin_heridas_expuestas.';
+COMMENT ON COLUMN "public"."plant_hygiene_worker_criteria"."item_code" IS 'TH: vestimenta_adecuada | sin_maquillaje | unas_cortas_limpias | sin_joyas — ENV: cabello_corto | cabello_recogido | afeitado | sin_heridas_expuestas';
+COMMENT ON COLUMN "public"."plant_hygiene_worker_criteria"."complies" IS 'TRUE = cumple, FALSE = no cumple';
+
+
+-- Primary keys
+ALTER TABLE ONLY "public"."plant_hygiene_areas"
+    ADD CONSTRAINT "plant_hygiene_areas_pkey" PRIMARY KEY ("id");
+
+ALTER TABLE ONLY "public"."plant_hygiene_workers"
+    ADD CONSTRAINT "plant_hygiene_workers_pkey" PRIMARY KEY ("id");
+
+ALTER TABLE ONLY "public"."plant_hygiene_worker_criteria"
+    ADD CONSTRAINT "plant_hygiene_worker_criteria_pkey" PRIMARY KEY ("id");
+
+
+-- Unique constraints
+ALTER TABLE ONLY "public"."plant_hygiene_areas"
+    ADD CONSTRAINT "plant_hygiene_areas_cooperative_date_area_key"
+    UNIQUE ("cooperative_id", "control_date", "area_code");
+
+ALTER TABLE ONLY "public"."plant_hygiene_worker_criteria"
+    ADD CONSTRAINT "plant_hygiene_worker_criteria_worker_item_key"
+    UNIQUE ("worker_id", "item_code");
+
+
+-- Indexes
+CREATE INDEX "idx_plant_hygiene_areas_coop_date"
+    ON "public"."plant_hygiene_areas" USING btree ("cooperative_id", "control_date" DESC);
+
+CREATE INDEX "idx_plant_hygiene_areas_created_by"
+    ON "public"."plant_hygiene_areas" USING btree ("created_by");
+
+CREATE INDEX "idx_plant_hygiene_workers_area"
+    ON "public"."plant_hygiene_workers" USING btree ("hygiene_area_id");
+
+CREATE INDEX "idx_plant_hygiene_worker_criteria_worker"
+    ON "public"."plant_hygiene_worker_criteria" USING btree ("worker_id");
+
+
+-- Foreign keys
+ALTER TABLE ONLY "public"."plant_hygiene_areas"
+    ADD CONSTRAINT "plant_hygiene_areas_cooperative_id_fkey"
+    FOREIGN KEY ("cooperative_id") REFERENCES "public"."cooperatives"("id") ON DELETE RESTRICT;
+
+ALTER TABLE ONLY "public"."plant_hygiene_areas"
+    ADD CONSTRAINT "plant_hygiene_areas_created_by_fkey"
+    FOREIGN KEY ("created_by") REFERENCES "public"."web_users"("id") ON DELETE RESTRICT;
+
+ALTER TABLE ONLY "public"."plant_hygiene_workers"
+    ADD CONSTRAINT "plant_hygiene_workers_hygiene_area_id_fkey"
+    FOREIGN KEY ("hygiene_area_id") REFERENCES "public"."plant_hygiene_areas"("id") ON DELETE CASCADE;
+
+ALTER TABLE ONLY "public"."plant_hygiene_workers"
+    ADD CONSTRAINT "plant_hygiene_workers_cooperative_id_fkey"
+    FOREIGN KEY ("cooperative_id") REFERENCES "public"."cooperatives"("id") ON DELETE RESTRICT;
+
+ALTER TABLE ONLY "public"."plant_hygiene_worker_criteria"
+    ADD CONSTRAINT "plant_hygiene_worker_criteria_worker_id_fkey"
+    FOREIGN KEY ("worker_id") REFERENCES "public"."plant_hygiene_workers"("id") ON DELETE CASCADE;
 
 
 ALTER PUBLICATION "supabase_realtime" OWNER TO "postgres";
@@ -5588,8 +5732,12 @@ GRANT ALL ON TABLE "public"."worker_controls" TO "service_role";
 -- ============================================================================
 -- FORMATOS DE CONTROL DE PRODUCCIÓN Y MATERIA PRIMA (CAMPO)
 -- ============================================================================
+-- FORMATOS FCMPTPH: CONTROL DE MATERIA PRIMA, PRODUCCIÓN, pH Y TEMPERATURA
+-- Un documento puede cubrir múltiples lotes de campo (para ahorro de papel).
+-- En trazabilidad, cada lote muestra su propia data + referencia al código.
+-- ============================================================================
 
-CREATE TABLE IF NOT EXISTS "public"."formatos_control_produccion_mp" (
+CREATE TABLE IF NOT EXISTS "public"."formatos_control_mp_ph" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "formato_codigo" character varying(30) NOT NULL,
     "cooperative_id" "uuid" NOT NULL,
@@ -5604,36 +5752,28 @@ CREATE TABLE IF NOT EXISTS "public"."formatos_control_produccion_mp" (
     "status" character varying(20) DEFAULT 'draft' NOT NULL,
     "created_at" timestamp with time zone DEFAULT "now"(),
     "updated_at" timestamp with time zone DEFAULT "now"(),
-    CONSTRAINT "fcmp_pkey" PRIMARY KEY ("id"),
-    CONSTRAINT "fcmp_formato_codigo_key" UNIQUE ("formato_codigo"),
-    CONSTRAINT "fcmp_status_check" CHECK (("status" IN ('draft', 'emitted')))
+    CONSTRAINT "fcmptph_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "fcmptph_formato_codigo_key" UNIQUE ("formato_codigo"),
+    CONSTRAINT "fcmptph_status_check" CHECK (("status" IN ('draft', 'emitted')))
 );
 
-ALTER TABLE "public"."formatos_control_produccion_mp" OWNER TO "postgres";
+ALTER TABLE "public"."formatos_control_mp_ph" OWNER TO "postgres";
 
-COMMENT ON TABLE "public"."formatos_control_produccion_mp" IS 'Formatos de control de producción y materia prima generados desde datos de campo (app móvil), por módulo y rango de fechas';
-COMMENT ON COLUMN "public"."formatos_control_produccion_mp"."formato_codigo" IS 'Código único del formato: NORA-FCMP-0001 / CAES-FCP-0001';
-COMMENT ON COLUMN "public"."formatos_control_produccion_mp"."module_id" IS 'Módulo al que pertenecen los lotes de campo incluidos';
-COMMENT ON COLUMN "public"."formatos_control_produccion_mp"."date_from" IS 'Inicio del período cubierto por el formato';
-COMMENT ON COLUMN "public"."formatos_control_produccion_mp"."date_to" IS 'Fin del período cubierto por el formato';
-COMMENT ON COLUMN "public"."formatos_control_produccion_mp"."emitted_by" IS 'UUID del web_user que emitió el formato';
-COMMENT ON COLUMN "public"."formatos_control_produccion_mp"."emitted_by_name" IS 'Nombre completo del emisor web (snapshot al momento de emitir)';
-COMMENT ON COLUMN "public"."formatos_control_produccion_mp"."approved_at" IS 'Fecha de aprobación (nullable - usado por CAES)';
-COMMENT ON COLUMN "public"."formatos_control_produccion_mp"."firmantes" IS 'Lista editable de firmantes antes de emitir: [{nombre, cargo, orden, fuente}]. fuente: auto (detectado de lotes) | manual (agregado en web)';
-COMMENT ON COLUMN "public"."formatos_control_produccion_mp"."status" IS 'Estado: draft (en preparación, editable) / emitted (emitido y firmado)';
+COMMENT ON TABLE "public"."formatos_control_mp_ph" IS 'Formatos FCMPTPH: control de materia prima, producción, pH y temperatura. Un documento puede cubrir N lotes de campo.';
+COMMENT ON COLUMN "public"."formatos_control_mp_ph"."formato_codigo" IS 'Código único: NORA-FCMPTPH-0001 / CAES-FCMPTPH-0001';
 
--- Lotes de campo incluidos en cada formato de control de producción y MP
-CREATE TABLE IF NOT EXISTS "public"."formatos_control_produccion_mp_lotes" (
+-- Lotes de campo incluidos en cada documento FCMPTPH
+CREATE TABLE IF NOT EXISTS "public"."formatos_control_mp_ph_lotes" (
     "formato_id" "uuid" NOT NULL,
     "lote_campo_id" "uuid" NOT NULL,
-    CONSTRAINT "fcmp_lotes_pkey" PRIMARY KEY ("formato_id", "lote_campo_id"),
-    CONSTRAINT "fcmp_lotes_formato_fkey" FOREIGN KEY ("formato_id") REFERENCES "public"."formatos_control_produccion_mp"("id") ON DELETE CASCADE,
-    CONSTRAINT "fcmp_lotes_lote_fkey" FOREIGN KEY ("lote_campo_id") REFERENCES "public"."production_batches"("id") ON DELETE CASCADE
+    CONSTRAINT "fcmptph_lotes_pkey" PRIMARY KEY ("formato_id", "lote_campo_id"),
+    CONSTRAINT "fcmptph_lotes_formato_fkey" FOREIGN KEY ("formato_id") REFERENCES "public"."formatos_control_mp_ph"("id") ON DELETE CASCADE,
+    CONSTRAINT "fcmptph_lotes_lote_fkey" FOREIGN KEY ("lote_campo_id") REFERENCES "public"."production_batches"("id") ON DELETE CASCADE
 );
 
-ALTER TABLE "public"."formatos_control_produccion_mp_lotes" OWNER TO "postgres";
+ALTER TABLE "public"."formatos_control_mp_ph_lotes" OWNER TO "postgres";
 
-COMMENT ON TABLE "public"."formatos_control_produccion_mp_lotes" IS 'Lotes de producción de campo incluidos en cada formato de control de producción y MP';
+COMMENT ON TABLE "public"."formatos_control_mp_ph_lotes" IS 'Lotes de campo incluidos en cada documento FCMPTPH';
 
 
 -- Función trigger: setea registered_by_user_id en production_batches desde auth.uid()
@@ -5695,20 +5835,18 @@ ALTER TABLE ONLY "public"."stowage_transport_inspections"
   REFERENCES "public"."users"("user_id", "cooperative_id") ON DELETE RESTRICT;
 
 
--- FKs de formatos_control_produccion_mp
-ALTER TABLE ONLY "public"."formatos_control_produccion_mp"
-    ADD CONSTRAINT "fcmp_cooperative_id_fkey"
+-- FKs de formatos_control_mp_ph
+ALTER TABLE ONLY "public"."formatos_control_mp_ph"
+    ADD CONSTRAINT "fcmptph_cooperative_id_fkey"
     FOREIGN KEY ("cooperative_id") REFERENCES "public"."cooperatives"("id") ON DELETE RESTRICT;
 
-ALTER TABLE ONLY "public"."formatos_control_produccion_mp"
-    ADD CONSTRAINT "fcmp_module_id_fkey"
+ALTER TABLE ONLY "public"."formatos_control_mp_ph"
+    ADD CONSTRAINT "fcmptph_module_id_fkey"
     FOREIGN KEY ("module_id") REFERENCES "public"."coop_modules"("id") ON DELETE RESTRICT;
 
--- RPC atómica: genera código, inserta formato + lotes de campo en una transacción
--- Lock por coop+tipo → imposible race condition en numeración
-CREATE OR REPLACE FUNCTION "public"."emit_formato_produccion_mp"(
+-- RPC atómica: genera código FCMPTPH, inserta formato + lotes en una transacción
+CREATE OR REPLACE FUNCTION "public"."emit_formato_mp_ph"(
   p_coop_code       text,
-  p_format_type     text,
   p_cooperative_id  uuid,
   p_module_id       uuid,
   p_date_from       date,
@@ -5726,17 +5864,17 @@ DECLARE
   v_code       text;
   v_formato_id uuid;
 BEGIN
-  PERFORM pg_advisory_xact_lock(hashtext(p_coop_code || '-' || p_format_type));
+  PERFORM pg_advisory_xact_lock(hashtext(p_coop_code || '-FCMPTPH'));
 
   SELECT COALESCE(MAX(CAST(SPLIT_PART(f.formato_codigo, '-', 3) AS integer)), 0) + 1
   INTO v_next_num
-  FROM public.formatos_control_produccion_mp f
+  FROM public.formatos_control_mp_ph f
   WHERE f.cooperative_id = p_cooperative_id
-    AND f.formato_codigo ~ ('^' || p_coop_code || '-' || p_format_type || '-[0-9]+$');
+    AND f.formato_codigo ~ ('^' || p_coop_code || '-FCMPTPH-[0-9]+$');
 
-  v_code := p_coop_code || '-' || p_format_type || '-' || LPAD(v_next_num::text, 4, '0');
+  v_code := p_coop_code || '-FCMPTPH-' || LPAD(v_next_num::text, 4, '0');
 
-  INSERT INTO public.formatos_control_produccion_mp (
+  INSERT INTO public.formatos_control_mp_ph (
     formato_codigo, cooperative_id, module_id, date_from, date_to,
     emitted_by, emitted_by_name, emitted_at, firmantes, status
   )
@@ -5746,119 +5884,29 @@ BEGIN
   )
   RETURNING id INTO v_formato_id;
 
-  INSERT INTO public.formatos_control_produccion_mp_lotes (formato_id, lote_campo_id)
+  INSERT INTO public.formatos_control_mp_ph_lotes (formato_id, lote_campo_id)
   SELECT v_formato_id, unnest(p_batch_ids);
 
   RETURN jsonb_build_object('formato_codigo', v_code, 'formato_id', v_formato_id);
 END;
 $$;
 
-ALTER FUNCTION "public"."emit_formato_produccion_mp"(text, text, uuid, uuid, date, date, uuid, text, jsonb, uuid[]) OWNER TO "postgres";
+ALTER FUNCTION "public"."emit_formato_mp_ph"(text, uuid, uuid, date, date, uuid, text, jsonb, uuid[]) OWNER TO "postgres";
 
-GRANT EXECUTE ON FUNCTION "public"."emit_formato_produccion_mp"(text, text, uuid, uuid, date, date, uuid, text, jsonb, uuid[]) TO "authenticated";
-GRANT EXECUTE ON FUNCTION "public"."emit_formato_produccion_mp"(text, text, uuid, uuid, date, date, uuid, text, jsonb, uuid[]) TO "service_role";
+GRANT EXECUTE ON FUNCTION "public"."emit_formato_mp_ph"(text, uuid, uuid, date, date, uuid, text, jsonb, uuid[]) TO "authenticated";
+GRANT EXECUTE ON FUNCTION "public"."emit_formato_mp_ph"(text, uuid, uuid, date, date, uuid, text, jsonb, uuid[]) TO "service_role";
 
 
 -- GRANTs
-GRANT ALL ON TABLE "public"."formatos_control_produccion_mp" TO "anon";
-GRANT ALL ON TABLE "public"."formatos_control_produccion_mp" TO "authenticated";
-GRANT ALL ON TABLE "public"."formatos_control_produccion_mp" TO "service_role";
+GRANT ALL ON TABLE "public"."formatos_control_mp_ph" TO "anon";
+GRANT ALL ON TABLE "public"."formatos_control_mp_ph" TO "authenticated";
+GRANT ALL ON TABLE "public"."formatos_control_mp_ph" TO "service_role";
 
-GRANT ALL ON TABLE "public"."formatos_control_produccion_mp_lotes" TO "anon";
-GRANT ALL ON TABLE "public"."formatos_control_produccion_mp_lotes" TO "authenticated";
-GRANT ALL ON TABLE "public"."formatos_control_produccion_mp_lotes" TO "service_role";
+GRANT ALL ON TABLE "public"."formatos_control_mp_ph_lotes" TO "anon";
+GRANT ALL ON TABLE "public"."formatos_control_mp_ph_lotes" TO "authenticated";
+GRANT ALL ON TABLE "public"."formatos_control_mp_ph_lotes" TO "service_role";
 
 
--- ============================================================================
--- FORMATOS DE CONTROL DE pH Y TEMPERATURA (CAMPO — 1 LOTE)
--- ============================================================================
-
-CREATE TABLE IF NOT EXISTS "public"."formatos_control_ph_temperatura" (
-    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
-    "formato_codigo" character varying(30) NOT NULL,
-    "cooperative_id" "uuid" NOT NULL,
-    "production_batch_id" "uuid" NOT NULL,
-    "module_id" "uuid" NOT NULL,
-    "emitted_by" "uuid",
-    "emitted_by_name" text,
-    "emitted_at" timestamp with time zone,
-    "firmantes" "jsonb" DEFAULT '[]'::"jsonb" NOT NULL,
-    "status" character varying(20) DEFAULT 'draft' NOT NULL,
-    "created_at" timestamp with time zone DEFAULT "now"(),
-    "updated_at" timestamp with time zone DEFAULT "now"(),
-    CONSTRAINT "fcph_pkey" PRIMARY KEY ("id"),
-    CONSTRAINT "fcph_formato_codigo_key" UNIQUE ("formato_codigo"),
-    CONSTRAINT "fcph_production_batch_unique" UNIQUE ("production_batch_id"),
-    CONSTRAINT "fcph_status_check" CHECK (("status" IN ('draft', 'emitted')))
-);
-
-ALTER TABLE "public"."formatos_control_ph_temperatura" OWNER TO "postgres";
-
-COMMENT ON TABLE "public"."formatos_control_ph_temperatura" IS 'Formatos de control de pH y temperatura por lote de producción individual de campo';
-COMMENT ON COLUMN "public"."formatos_control_ph_temperatura"."production_batch_id" IS 'Un formato por lote de producción (relación 1:1)';
-COMMENT ON COLUMN "public"."formatos_control_ph_temperatura"."firmantes" IS '[{nombre, cargo, orden, fuente}] — editable antes de emitir';
-
-ALTER TABLE ONLY "public"."formatos_control_ph_temperatura"
-    ADD CONSTRAINT "fcph_cooperative_id_fkey"
-    FOREIGN KEY ("cooperative_id") REFERENCES "public"."cooperatives"("id") ON DELETE RESTRICT;
-
-ALTER TABLE ONLY "public"."formatos_control_ph_temperatura"
-    ADD CONSTRAINT "fcph_production_batch_id_fkey"
-    FOREIGN KEY ("production_batch_id") REFERENCES "public"."production_batches"("id") ON DELETE RESTRICT;
-
-ALTER TABLE ONLY "public"."formatos_control_ph_temperatura"
-    ADD CONSTRAINT "fcph_module_id_fkey"
-    FOREIGN KEY ("module_id") REFERENCES "public"."coop_modules"("id") ON DELETE RESTRICT;
-
--- RPC atómica: genera código e inserta formato de pH/temperatura
-CREATE OR REPLACE FUNCTION "public"."emit_formato_ph_temperatura"(
-  p_coop_code       text,
-  p_cooperative_id  uuid,
-  p_production_batch_id uuid,
-  p_module_id       uuid,
-  p_emitted_by      uuid,
-  p_emitted_by_name text,
-  p_firmantes       jsonb
-) RETURNS jsonb
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS $$
-DECLARE
-  v_next_num   integer;
-  v_code       text;
-  v_formato_id uuid;
-BEGIN
-  PERFORM pg_advisory_xact_lock(hashtext(p_coop_code || '-FCPH'));
-
-  SELECT COALESCE(MAX(CAST(SPLIT_PART(f.formato_codigo, '-', 3) AS integer)), 0) + 1
-  INTO v_next_num
-  FROM public.formatos_control_ph_temperatura f
-  WHERE f.cooperative_id = p_cooperative_id
-    AND f.formato_codigo ~ ('^' || p_coop_code || '-FCPH-[0-9]+$');
-
-  v_code := p_coop_code || '-FCPH-' || LPAD(v_next_num::text, 4, '0');
-
-  INSERT INTO public.formatos_control_ph_temperatura (
-    formato_codigo, cooperative_id, production_batch_id, module_id,
-    emitted_by, emitted_by_name, emitted_at, firmantes, status
-  )
-  VALUES (
-    v_code, p_cooperative_id, p_production_batch_id, p_module_id,
-    p_emitted_by, p_emitted_by_name, now(), p_firmantes, 'emitted'
-  )
-  RETURNING id INTO v_formato_id;
-
-  RETURN jsonb_build_object('formato_codigo', v_code, 'formato_id', v_formato_id);
-END;
-$$;
-
-ALTER FUNCTION "public"."emit_formato_ph_temperatura"(text, uuid, uuid, uuid, uuid, text, jsonb) OWNER TO "postgres";
-GRANT EXECUTE ON FUNCTION "public"."emit_formato_ph_temperatura"(text, uuid, uuid, uuid, uuid, text, jsonb) TO "authenticated";
-GRANT EXECUTE ON FUNCTION "public"."emit_formato_ph_temperatura"(text, uuid, uuid, uuid, uuid, text, jsonb) TO "service_role";
-
-GRANT ALL ON TABLE "public"."formatos_control_ph_temperatura" TO "anon";
-GRANT ALL ON TABLE "public"."formatos_control_ph_temperatura" TO "authenticated";
-GRANT ALL ON TABLE "public"."formatos_control_ph_temperatura" TO "service_role";
 
 -- Columnas de documento para estiba/transporte (ALTER TABLE sobre tabla existente)
 ALTER TABLE "public"."stowage_transport_inspections"
@@ -5920,6 +5968,588 @@ $$;
 ALTER FUNCTION "public"."emit_formato_estiba_transporte"(text, uuid, uuid, uuid, text, jsonb) OWNER TO "postgres";
 GRANT EXECUTE ON FUNCTION "public"."emit_formato_estiba_transporte"(text, uuid, uuid, uuid, text, jsonb) TO "authenticated";
 GRANT EXECUTE ON FUNCTION "public"."emit_formato_estiba_transporte"(text, uuid, uuid, uuid, text, jsonb) TO "service_role";
+
+
+-- ── FCCLR: Formato de Control de Cloro Libre Residual ────────────────────────
+
+CREATE TABLE IF NOT EXISTS "public"."formatos_control_cloro" (
+    "id"              uuid                     DEFAULT gen_random_uuid() NOT NULL,
+    "formato_codigo"  character varying(30),
+    "cooperative_id"  uuid                     NOT NULL,
+    "module_id"       uuid                     NOT NULL,
+    "date_from"       date                     NOT NULL,
+    "date_to"         date                     NOT NULL,
+    "emitted_by"      uuid,
+    "emitted_by_name" text,
+    "emitted_at"      timestamp with time zone,
+    "firmantes"       jsonb                    DEFAULT '[]'::jsonb NOT NULL,
+    "status"          character varying(20)    DEFAULT 'draft' NOT NULL,
+    "created_at"      timestamp with time zone DEFAULT now(),
+    CONSTRAINT "fccl_pkey"       PRIMARY KEY ("id"),
+    CONSTRAINT "fccl_code_key"   UNIQUE ("formato_codigo"),
+    CONSTRAINT "fccl_status_chk" CHECK (status IN ('draft', 'emitted'))
+);
+
+ALTER TABLE "public"."formatos_control_cloro" OWNER TO "postgres";
+COMMENT ON TABLE "public"."formatos_control_cloro" IS 'Formatos FCCLR: control de cloro libre residual por módulo y período.';
+
+ALTER TABLE ONLY "public"."formatos_control_cloro"
+    ADD CONSTRAINT "fccl_coop_fkey"
+    FOREIGN KEY ("cooperative_id") REFERENCES "public"."cooperatives"("id") ON DELETE RESTRICT;
+
+ALTER TABLE ONLY "public"."formatos_control_cloro"
+    ADD CONSTRAINT "fccl_module_fkey"
+    FOREIGN KEY ("module_id") REFERENCES "public"."coop_modules"("id") ON DELETE RESTRICT;
+
+CREATE OR REPLACE FUNCTION "public"."emit_formato_control_cloro"(
+    p_coop_code       text,
+    p_cooperative_id  uuid,
+    p_module_id       uuid,
+    p_date_from       date,
+    p_date_to         date,
+    p_emitted_by      uuid,
+    p_emitted_by_name text,
+    p_firmantes       jsonb
+) RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    v_next_num integer;
+    v_code     text;
+BEGIN
+    PERFORM pg_advisory_xact_lock(hashtext(p_coop_code || '-FCCLR'));
+
+    SELECT COALESCE(MAX(CAST(SPLIT_PART(f.formato_codigo, '-', 3) AS integer)), 0) + 1
+    INTO v_next_num
+    FROM public.formatos_control_cloro f
+    WHERE f.cooperative_id = p_cooperative_id
+      AND f.formato_codigo ~ ('^' || p_coop_code || '-FCCLR-[0-9]+$');
+
+    v_code := p_coop_code || '-FCCLR-' || LPAD(v_next_num::text, 4, '0');
+
+    INSERT INTO public.formatos_control_cloro (
+        cooperative_id, module_id, date_from, date_to, formato_codigo,
+        emitted_by, emitted_by_name, emitted_at, firmantes, status
+    ) VALUES (
+        p_cooperative_id, p_module_id, p_date_from, p_date_to, v_code,
+        p_emitted_by, p_emitted_by_name, now(), p_firmantes, 'emitted'
+    );
+
+    RETURN jsonb_build_object('formato_codigo', v_code);
+END;
+$$;
+
+ALTER FUNCTION "public"."emit_formato_control_cloro"(text, uuid, uuid, date, date, uuid, text, jsonb) OWNER TO "postgres";
+GRANT EXECUTE ON FUNCTION "public"."emit_formato_control_cloro"(text, uuid, uuid, date, date, uuid, text, jsonb) TO "authenticated";
+GRANT EXECUTE ON FUNCTION "public"."emit_formato_control_cloro"(text, uuid, uuid, date, date, uuid, text, jsonb) TO "service_role";
+
+GRANT ALL ON TABLE "public"."formatos_control_cloro" TO "anon";
+GRANT ALL ON TABLE "public"."formatos_control_cloro" TO "authenticated";
+GRANT ALL ON TABLE "public"."formatos_control_cloro" TO "service_role";
+
+
+-- ── FCPO: Formato de Control de Personal Operario ────────────────────────────
+
+CREATE TABLE IF NOT EXISTS "public"."formatos_control_personal" (
+    "id"                  uuid                     DEFAULT gen_random_uuid() NOT NULL,
+    "formato_codigo"      character varying(30),
+    "cooperative_id"      uuid                     NOT NULL,
+    "production_batch_id" uuid                     NOT NULL,
+    "emitted_by"          uuid,
+    "emitted_by_name"     text,
+    "emitted_at"          timestamp with time zone,
+    "firmantes"           jsonb                    DEFAULT '[]'::jsonb NOT NULL,
+    "status"              character varying(20)    DEFAULT 'draft' NOT NULL,
+    "created_at"          timestamp with time zone DEFAULT now(),
+    CONSTRAINT "fcpo_pkey"         PRIMARY KEY ("id"),
+    CONSTRAINT "fcpo_unique_batch" UNIQUE ("cooperative_id", "production_batch_id"),
+    CONSTRAINT "fcpo_codigo_key"   UNIQUE ("formato_codigo"),
+    CONSTRAINT "fcpo_status_check" CHECK (status IN ('draft', 'emitted'))
+);
+
+ALTER TABLE "public"."formatos_control_personal" OWNER TO "postgres";
+COMMENT ON TABLE "public"."formatos_control_personal" IS 'Formatos FCPO: control de personal operario por lote de campo.';
+
+ALTER TABLE ONLY "public"."formatos_control_personal"
+    ADD CONSTRAINT "fcpo_cooperative_fkey"
+    FOREIGN KEY ("cooperative_id") REFERENCES "public"."cooperatives"("id") ON DELETE RESTRICT;
+
+ALTER TABLE ONLY "public"."formatos_control_personal"
+    ADD CONSTRAINT "fcpo_batch_fkey"
+    FOREIGN KEY ("production_batch_id") REFERENCES "public"."production_batches"("id") ON DELETE RESTRICT;
+
+CREATE OR REPLACE FUNCTION "public"."emit_formato_control_personal"(
+    p_coop_code       text,
+    p_cooperative_id  uuid,
+    p_batch_id        uuid,
+    p_emitted_by      uuid,
+    p_emitted_by_name text,
+    p_firmantes       jsonb
+) RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    v_next_num integer;
+    v_code     text;
+BEGIN
+    PERFORM pg_advisory_xact_lock(hashtext(p_coop_code || '-FCPO'));
+
+    SELECT COALESCE(MAX(CAST(SPLIT_PART(f.formato_codigo, '-', 3) AS integer)), 0) + 1
+    INTO v_next_num
+    FROM public.formatos_control_personal f
+    WHERE f.cooperative_id = p_cooperative_id
+      AND f.formato_codigo ~ ('^' || p_coop_code || '-FCPO-[0-9]+$');
+
+    v_code := p_coop_code || '-FCPO-' || LPAD(v_next_num::text, 4, '0');
+
+    INSERT INTO public.formatos_control_personal (
+        cooperative_id, production_batch_id, formato_codigo,
+        emitted_by, emitted_by_name, emitted_at, firmantes, status
+    ) VALUES (
+        p_cooperative_id, p_batch_id, v_code,
+        p_emitted_by, p_emitted_by_name, now(), p_firmantes, 'emitted'
+    )
+    ON CONFLICT (cooperative_id, production_batch_id)
+    DO UPDATE SET
+        formato_codigo  = v_code,
+        emitted_by      = p_emitted_by,
+        emitted_by_name = p_emitted_by_name,
+        emitted_at      = now(),
+        firmantes       = p_firmantes,
+        status          = 'emitted';
+
+    RETURN jsonb_build_object('formato_codigo', v_code);
+END;
+$$;
+
+ALTER FUNCTION "public"."emit_formato_control_personal"(text, uuid, uuid, uuid, text, jsonb) OWNER TO "postgres";
+GRANT EXECUTE ON FUNCTION "public"."emit_formato_control_personal"(text, uuid, uuid, uuid, text, jsonb) TO "authenticated";
+GRANT EXECUTE ON FUNCTION "public"."emit_formato_control_personal"(text, uuid, uuid, uuid, text, jsonb) TO "service_role";
+
+GRANT ALL ON TABLE "public"."formatos_control_personal" TO "anon";
+GRANT ALL ON TABLE "public"."formatos_control_personal" TO "authenticated";
+GRANT ALL ON TABLE "public"."formatos_control_personal" TO "service_role";
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- FIAE: Formato de Inspección de Ambientes, Equipo y Personal
+-- ════════════════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS "public"."formatos_inspeccion_ambientes" (
+    "id"              uuid                     DEFAULT gen_random_uuid() NOT NULL,
+    "formato_codigo"  character varying(30),
+    "cooperative_id"  uuid                     NOT NULL,
+    "module_id"       uuid                     NOT NULL,
+    "inspection_id"   uuid                     NOT NULL,
+    "inspection_date" date                     NOT NULL,
+    "emitted_by"      uuid,
+    "emitted_by_name" text,
+    "emitted_at"      timestamp with time zone,
+    "firmantes"       jsonb                    DEFAULT '[]'::jsonb NOT NULL,
+    "status"          character varying(20)    DEFAULT 'draft' NOT NULL,
+    "created_at"      timestamp with time zone DEFAULT now(),
+    CONSTRAINT "fiae_pkey"       PRIMARY KEY ("id"),
+    CONSTRAINT "fiae_code_key"   UNIQUE ("formato_codigo"),
+    CONSTRAINT "fiae_insp_key"   UNIQUE ("inspection_id"),
+    CONSTRAINT "fiae_status_chk" CHECK (status IN ('draft', 'emitted'))
+);
+
+ALTER TABLE "public"."formatos_inspeccion_ambientes" OWNER TO "postgres";
+COMMENT ON TABLE "public"."formatos_inspeccion_ambientes" IS 'Formatos FIAE: inspección de ambientes, equipo y personal, uno por registro de inspección.';
+
+ALTER TABLE ONLY "public"."formatos_inspeccion_ambientes"
+    ADD CONSTRAINT "fiae_coop_fkey"
+    FOREIGN KEY ("cooperative_id") REFERENCES "public"."cooperatives"("id") ON DELETE RESTRICT;
+
+ALTER TABLE ONLY "public"."formatos_inspeccion_ambientes"
+    ADD CONSTRAINT "fiae_module_fkey"
+    FOREIGN KEY ("module_id") REFERENCES "public"."coop_modules"("id") ON DELETE RESTRICT;
+
+ALTER TABLE ONLY "public"."formatos_inspeccion_ambientes"
+    ADD CONSTRAINT "fiae_inspection_fkey"
+    FOREIGN KEY ("inspection_id") REFERENCES "public"."environment_inspections"("id") ON DELETE RESTRICT;
+
+CREATE OR REPLACE FUNCTION "public"."emit_formato_inspeccion_ambientes"(
+    p_coop_code       text,
+    p_cooperative_id  uuid,
+    p_module_id       uuid,
+    p_inspection_id   uuid,
+    p_inspection_date date,
+    p_emitted_by      uuid,
+    p_emitted_by_name text,
+    p_firmantes       jsonb
+) RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    v_next_num integer;
+    v_code     text;
+BEGIN
+    PERFORM pg_advisory_xact_lock(hashtext(p_coop_code || '-FIAE'));
+
+    SELECT COALESCE(MAX(CAST(SPLIT_PART(f.formato_codigo, '-', 3) AS integer)), 0) + 1
+    INTO v_next_num
+    FROM public.formatos_inspeccion_ambientes f
+    WHERE f.cooperative_id = p_cooperative_id
+      AND f.formato_codigo ~ ('^' || p_coop_code || '-FIAE-[0-9]+$');
+
+    v_code := p_coop_code || '-FIAE-' || LPAD(v_next_num::text, 4, '0');
+
+    INSERT INTO public.formatos_inspeccion_ambientes (
+        cooperative_id, module_id, inspection_id, inspection_date, formato_codigo,
+        emitted_by, emitted_by_name, emitted_at, firmantes, status
+    ) VALUES (
+        p_cooperative_id, p_module_id, p_inspection_id, p_inspection_date, v_code,
+        p_emitted_by, p_emitted_by_name, now(), p_firmantes, 'emitted'
+    )
+    ON CONFLICT (inspection_id)
+    DO UPDATE SET
+        formato_codigo  = v_code,
+        emitted_by      = p_emitted_by,
+        emitted_by_name = p_emitted_by_name,
+        emitted_at      = now(),
+        firmantes       = p_firmantes,
+        status          = 'emitted';
+
+    RETURN jsonb_build_object('formato_codigo', v_code);
+END;
+$$;
+
+ALTER FUNCTION "public"."emit_formato_inspeccion_ambientes"(text, uuid, uuid, uuid, date, uuid, text, jsonb) OWNER TO "postgres";
+GRANT EXECUTE ON FUNCTION "public"."emit_formato_inspeccion_ambientes"(text, uuid, uuid, uuid, date, uuid, text, jsonb) TO "authenticated";
+GRANT EXECUTE ON FUNCTION "public"."emit_formato_inspeccion_ambientes"(text, uuid, uuid, uuid, date, uuid, text, jsonb) TO "service_role";
+
+GRANT ALL ON TABLE "public"."formatos_inspeccion_ambientes" TO "anon";
+GRANT ALL ON TABLE "public"."formatos_inspeccion_ambientes" TO "authenticated";
+GRANT ALL ON TABLE "public"."formatos_inspeccion_ambientes" TO "service_role";
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- FCP: Formato de Control de Plagas
+-- ════════════════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS "public"."formatos_control_plagas" (
+    "id"              uuid                     DEFAULT gen_random_uuid() NOT NULL,
+    "formato_codigo"  character varying(30),
+    "cooperative_id"  uuid                     NOT NULL,
+    "module_id"       uuid                     NOT NULL,
+    "date_from"       date                     NOT NULL,
+    "date_to"         date                     NOT NULL,
+    "emitted_by"      uuid,
+    "emitted_by_name" text,
+    "emitted_at"      timestamp with time zone,
+    "firmantes"       jsonb                    DEFAULT '[]'::jsonb NOT NULL,
+    "status"          character varying(20)    DEFAULT 'draft' NOT NULL,
+    "created_at"      timestamp with time zone DEFAULT now(),
+    CONSTRAINT "fcp_pkey"       PRIMARY KEY ("id"),
+    CONSTRAINT "fcp_code_key"   UNIQUE ("formato_codigo"),
+    CONSTRAINT "fcp_status_chk" CHECK (status IN ('draft', 'emitted'))
+);
+
+ALTER TABLE "public"."formatos_control_plagas" OWNER TO "postgres";
+COMMENT ON TABLE "public"."formatos_control_plagas" IS 'Formatos FCP: control de plagas por módulo y período.';
+
+ALTER TABLE ONLY "public"."formatos_control_plagas"
+    ADD CONSTRAINT "fcp_coop_fkey"
+    FOREIGN KEY ("cooperative_id") REFERENCES "public"."cooperatives"("id") ON DELETE RESTRICT;
+
+ALTER TABLE ONLY "public"."formatos_control_plagas"
+    ADD CONSTRAINT "fcp_module_fkey"
+    FOREIGN KEY ("module_id") REFERENCES "public"."coop_modules"("id") ON DELETE RESTRICT;
+
+CREATE OR REPLACE FUNCTION "public"."emit_formato_control_plagas"(
+    p_coop_code       text,
+    p_cooperative_id  uuid,
+    p_module_id       uuid,
+    p_date_from       date,
+    p_date_to         date,
+    p_emitted_by      uuid,
+    p_emitted_by_name text,
+    p_firmantes       jsonb
+) RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    v_next_num integer;
+    v_code     text;
+BEGIN
+    PERFORM pg_advisory_xact_lock(hashtext(p_coop_code || '-FCP'));
+
+    SELECT COALESCE(MAX(CAST(SPLIT_PART(f.formato_codigo, '-', 3) AS integer)), 0) + 1
+    INTO v_next_num
+    FROM public.formatos_control_plagas f
+    WHERE f.cooperative_id = p_cooperative_id
+      AND f.formato_codigo ~ ('^' || p_coop_code || '-FCP-[0-9]+$');
+
+    v_code := p_coop_code || '-FCP-' || LPAD(v_next_num::text, 4, '0');
+
+    INSERT INTO public.formatos_control_plagas (
+        cooperative_id, module_id, date_from, date_to, formato_codigo,
+        emitted_by, emitted_by_name, emitted_at, firmantes, status
+    ) VALUES (
+        p_cooperative_id, p_module_id, p_date_from, p_date_to, v_code,
+        p_emitted_by, p_emitted_by_name, now(), p_firmantes, 'emitted'
+    );
+
+    RETURN jsonb_build_object('formato_codigo', v_code);
+END;
+$$;
+
+ALTER FUNCTION "public"."emit_formato_control_plagas"(text, uuid, uuid, date, date, uuid, text, jsonb) OWNER TO "postgres";
+GRANT EXECUTE ON FUNCTION "public"."emit_formato_control_plagas"(text, uuid, uuid, date, date, uuid, text, jsonb) TO "authenticated";
+GRANT EXECUTE ON FUNCTION "public"."emit_formato_control_plagas"(text, uuid, uuid, date, date, uuid, text, jsonb) TO "service_role";
+
+GRANT ALL ON TABLE "public"."formatos_control_plagas" TO "anon";
+GRANT ALL ON TABLE "public"."formatos_control_plagas" TO "authenticated";
+GRANT ALL ON TABLE "public"."formatos_control_plagas" TO "service_role";
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- FSEA: Formato de Seguimiento de Enfermedades y Accidentes
+-- ════════════════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS "public"."formatos_seguimiento_salud" (
+    "id"              uuid                     DEFAULT gen_random_uuid() NOT NULL,
+    "formato_codigo"  character varying(30),
+    "cooperative_id"  uuid                     NOT NULL,
+    "module_id"       uuid                     NOT NULL,
+    "date_from"       date                     NOT NULL,
+    "date_to"         date                     NOT NULL,
+    "emitted_by"      uuid,
+    "emitted_by_name" text,
+    "emitted_at"      timestamp with time zone,
+    "firmantes"       jsonb                    DEFAULT '[]'::jsonb NOT NULL,
+    "status"          character varying(20)    DEFAULT 'draft' NOT NULL,
+    "created_at"      timestamp with time zone DEFAULT now(),
+    CONSTRAINT "fsea_pkey"       PRIMARY KEY ("id"),
+    CONSTRAINT "fsea_code_key"   UNIQUE ("formato_codigo"),
+    CONSTRAINT "fsea_status_chk" CHECK (status IN ('draft', 'emitted'))
+);
+
+ALTER TABLE "public"."formatos_seguimiento_salud" OWNER TO "postgres";
+COMMENT ON TABLE "public"."formatos_seguimiento_salud" IS 'Formatos FSEA: seguimiento de enfermedades y accidentes por módulo y período.';
+
+ALTER TABLE ONLY "public"."formatos_seguimiento_salud"
+    ADD CONSTRAINT "fsea_coop_fkey"
+    FOREIGN KEY ("cooperative_id") REFERENCES "public"."cooperatives"("id") ON DELETE RESTRICT;
+
+ALTER TABLE ONLY "public"."formatos_seguimiento_salud"
+    ADD CONSTRAINT "fsea_module_fkey"
+    FOREIGN KEY ("module_id") REFERENCES "public"."coop_modules"("id") ON DELETE RESTRICT;
+
+CREATE OR REPLACE FUNCTION "public"."emit_formato_seguimiento_salud"(
+    p_coop_code       text,
+    p_cooperative_id  uuid,
+    p_module_id       uuid,
+    p_date_from       date,
+    p_date_to         date,
+    p_emitted_by      uuid,
+    p_emitted_by_name text,
+    p_firmantes       jsonb
+) RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    v_next_num integer;
+    v_code     text;
+BEGIN
+    PERFORM pg_advisory_xact_lock(hashtext(p_coop_code || '-FSEA'));
+
+    SELECT COALESCE(MAX(CAST(SPLIT_PART(f.formato_codigo, '-', 3) AS integer)), 0) + 1
+    INTO v_next_num
+    FROM public.formatos_seguimiento_salud f
+    WHERE f.cooperative_id = p_cooperative_id
+      AND f.formato_codigo ~ ('^' || p_coop_code || '-FSEA-[0-9]+$');
+
+    v_code := p_coop_code || '-FSEA-' || LPAD(v_next_num::text, 4, '0');
+
+    INSERT INTO public.formatos_seguimiento_salud (
+        cooperative_id, module_id, date_from, date_to, formato_codigo,
+        emitted_by, emitted_by_name, emitted_at, firmantes, status
+    ) VALUES (
+        p_cooperative_id, p_module_id, p_date_from, p_date_to, v_code,
+        p_emitted_by, p_emitted_by_name, now(), p_firmantes, 'emitted'
+    );
+
+    RETURN jsonb_build_object('formato_codigo', v_code);
+END;
+$$;
+
+ALTER FUNCTION "public"."emit_formato_seguimiento_salud"(text, uuid, uuid, date, date, uuid, text, jsonb) OWNER TO "postgres";
+GRANT EXECUTE ON FUNCTION "public"."emit_formato_seguimiento_salud"(text, uuid, uuid, date, date, uuid, text, jsonb) TO "authenticated";
+GRANT EXECUTE ON FUNCTION "public"."emit_formato_seguimiento_salud"(text, uuid, uuid, date, date, uuid, text, jsonb) TO "service_role";
+
+GRANT ALL ON TABLE "public"."formatos_seguimiento_salud" TO "anon";
+GRANT ALL ON TABLE "public"."formatos_seguimiento_salud" TO "authenticated";
+GRANT ALL ON TABLE "public"."formatos_seguimiento_salud" TO "service_role";
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- FMEH: Formato de Mantenimiento de Equipos y Hornillas
+-- ════════════════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS "public"."formatos_mantenimiento_equipos" (
+    "id"              uuid                     DEFAULT gen_random_uuid() NOT NULL,
+    "formato_codigo"  character varying(30),
+    "cooperative_id"  uuid                     NOT NULL,
+    "module_id"       uuid                     NOT NULL,
+    "date_from"       date                     NOT NULL,
+    "date_to"         date                     NOT NULL,
+    "emitted_by"      uuid,
+    "emitted_by_name" text,
+    "emitted_at"      timestamp with time zone,
+    "firmantes"       jsonb                    DEFAULT '[]'::jsonb NOT NULL,
+    "status"          character varying(20)    DEFAULT 'draft' NOT NULL,
+    "created_at"      timestamp with time zone DEFAULT now(),
+    CONSTRAINT "fmeh_pkey"       PRIMARY KEY ("id"),
+    CONSTRAINT "fmeh_code_key"   UNIQUE ("formato_codigo"),
+    CONSTRAINT "fmeh_status_chk" CHECK (status IN ('draft', 'emitted'))
+);
+
+ALTER TABLE "public"."formatos_mantenimiento_equipos" OWNER TO "postgres";
+COMMENT ON TABLE "public"."formatos_mantenimiento_equipos" IS 'Formatos FMEH: mantenimiento de equipos y hornillas por módulo y período.';
+
+ALTER TABLE ONLY "public"."formatos_mantenimiento_equipos"
+    ADD CONSTRAINT "fmeh_coop_fkey"
+    FOREIGN KEY ("cooperative_id") REFERENCES "public"."cooperatives"("id") ON DELETE RESTRICT;
+
+ALTER TABLE ONLY "public"."formatos_mantenimiento_equipos"
+    ADD CONSTRAINT "fmeh_module_fkey"
+    FOREIGN KEY ("module_id") REFERENCES "public"."coop_modules"("id") ON DELETE RESTRICT;
+
+CREATE OR REPLACE FUNCTION "public"."emit_formato_mantenimiento_equipos"(
+    p_coop_code       text,
+    p_cooperative_id  uuid,
+    p_module_id       uuid,
+    p_date_from       date,
+    p_date_to         date,
+    p_emitted_by      uuid,
+    p_emitted_by_name text,
+    p_firmantes       jsonb
+) RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    v_next_num integer;
+    v_code     text;
+BEGIN
+    PERFORM pg_advisory_xact_lock(hashtext(p_coop_code || '-FMEH'));
+
+    SELECT COALESCE(MAX(CAST(SPLIT_PART(f.formato_codigo, '-', 3) AS integer)), 0) + 1
+    INTO v_next_num
+    FROM public.formatos_mantenimiento_equipos f
+    WHERE f.cooperative_id = p_cooperative_id
+      AND f.formato_codigo ~ ('^' || p_coop_code || '-FMEH-[0-9]+$');
+
+    v_code := p_coop_code || '-FMEH-' || LPAD(v_next_num::text, 4, '0');
+
+    INSERT INTO public.formatos_mantenimiento_equipos (
+        cooperative_id, module_id, date_from, date_to, formato_codigo,
+        emitted_by, emitted_by_name, emitted_at, firmantes, status
+    ) VALUES (
+        p_cooperative_id, p_module_id, p_date_from, p_date_to, v_code,
+        p_emitted_by, p_emitted_by_name, now(), p_firmantes, 'emitted'
+    );
+
+    RETURN jsonb_build_object('formato_codigo', v_code);
+END;
+$$;
+
+ALTER FUNCTION "public"."emit_formato_mantenimiento_equipos"(text, uuid, uuid, date, date, uuid, text, jsonb) OWNER TO "postgres";
+GRANT EXECUTE ON FUNCTION "public"."emit_formato_mantenimiento_equipos"(text, uuid, uuid, date, date, uuid, text, jsonb) TO "authenticated";
+GRANT EXECUTE ON FUNCTION "public"."emit_formato_mantenimiento_equipos"(text, uuid, uuid, date, date, uuid, text, jsonb) TO "service_role";
+
+GRANT ALL ON TABLE "public"."formatos_mantenimiento_equipos" TO "anon";
+GRANT ALL ON TABLE "public"."formatos_mantenimiento_equipos" TO "authenticated";
+GRANT ALL ON TABLE "public"."formatos_mantenimiento_equipos" TO "service_role";
+
+
+-- ── FLDH: Formato de Limpieza y Desinfección ─────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS "public"."formatos_limpieza_desinfeccion" (
+    "id"              uuid                     DEFAULT gen_random_uuid() NOT NULL,
+    "formato_codigo"  character varying(30),
+    "cooperative_id"  uuid                     NOT NULL,
+    "module_id"       uuid                     NOT NULL,
+    "date_from"       date                     NOT NULL,
+    "date_to"         date                     NOT NULL,
+    "emitted_by"      uuid,
+    "emitted_by_name" text,
+    "emitted_at"      timestamp with time zone,
+    "firmantes"       jsonb                    DEFAULT '[]'::jsonb NOT NULL,
+    "status"          character varying(20)    DEFAULT 'draft' NOT NULL,
+    "created_at"      timestamp with time zone DEFAULT now(),
+    CONSTRAINT "fldh_pkey"       PRIMARY KEY ("id"),
+    CONSTRAINT "fldh_code_key"   UNIQUE ("formato_codigo"),
+    CONSTRAINT "fldh_status_chk" CHECK (status IN ('draft', 'emitted'))
+);
+
+ALTER TABLE "public"."formatos_limpieza_desinfeccion" OWNER TO "postgres";
+COMMENT ON TABLE "public"."formatos_limpieza_desinfeccion" IS 'Formatos FLDH: limpieza y desinfección por módulo y período.';
+
+ALTER TABLE ONLY "public"."formatos_limpieza_desinfeccion"
+    ADD CONSTRAINT "fldh_coop_fkey"
+    FOREIGN KEY ("cooperative_id") REFERENCES "public"."cooperatives"("id") ON DELETE RESTRICT;
+
+ALTER TABLE ONLY "public"."formatos_limpieza_desinfeccion"
+    ADD CONSTRAINT "fldh_module_fkey"
+    FOREIGN KEY ("module_id") REFERENCES "public"."coop_modules"("id") ON DELETE RESTRICT;
+
+ALTER TABLE "public"."formatos_limpieza_desinfeccion" ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "fldh_coop_isolation" ON "public"."formatos_limpieza_desinfeccion"
+    FOR ALL USING (cooperative_id = auth_cooperative_id() OR is_service_role());
+
+CREATE OR REPLACE FUNCTION "public"."emit_formato_limpieza_desinfeccion"(
+    p_coop_code       text,
+    p_cooperative_id  uuid,
+    p_module_id       uuid,
+    p_date_from       date,
+    p_date_to         date,
+    p_emitted_by      uuid,
+    p_emitted_by_name text,
+    p_firmantes       jsonb
+) RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    v_next_num integer;
+    v_code     text;
+BEGIN
+    PERFORM pg_advisory_xact_lock(hashtext(p_coop_code || '-FLDH'));
+
+    SELECT COALESCE(MAX(CAST(SPLIT_PART(f.formato_codigo, '-', 3) AS integer)), 0) + 1
+    INTO v_next_num
+    FROM public.formatos_limpieza_desinfeccion f
+    WHERE f.cooperative_id = p_cooperative_id
+      AND f.formato_codigo ~ ('^' || p_coop_code || '-FLDH-[0-9]+$');
+
+    v_code := p_coop_code || '-FLDH-' || LPAD(v_next_num::text, 4, '0');
+
+    INSERT INTO public.formatos_limpieza_desinfeccion (
+        cooperative_id, module_id, date_from, date_to, formato_codigo,
+        emitted_by, emitted_by_name, emitted_at, firmantes, status
+    ) VALUES (
+        p_cooperative_id, p_module_id, p_date_from, p_date_to, v_code,
+        p_emitted_by, p_emitted_by_name, now(), p_firmantes, 'emitted'
+    );
+
+    RETURN jsonb_build_object('formato_codigo', v_code);
+END;
+$$;
+
+ALTER FUNCTION "public"."emit_formato_limpieza_desinfeccion"(text, uuid, uuid, date, date, uuid, text, jsonb) OWNER TO "postgres";
+GRANT EXECUTE ON FUNCTION "public"."emit_formato_limpieza_desinfeccion"(text, uuid, uuid, date, date, uuid, text, jsonb) TO "authenticated";
+GRANT EXECUTE ON FUNCTION "public"."emit_formato_limpieza_desinfeccion"(text, uuid, uuid, date, date, uuid, text, jsonb) TO "service_role";
+
+GRANT ALL ON TABLE "public"."formatos_limpieza_desinfeccion" TO "anon";
+GRANT ALL ON TABLE "public"."formatos_limpieza_desinfeccion" TO "authenticated";
+GRANT ALL ON TABLE "public"."formatos_limpieza_desinfeccion" TO "service_role";
 
 
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON SEQUENCES TO "postgres";
