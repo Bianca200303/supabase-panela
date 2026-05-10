@@ -1,0 +1,6 @@
+# SQL de prueba local — nunca van a la nube
+supabase/scratch/
+
+# Supabase
+supabase/.temp/
+supabase/.env
