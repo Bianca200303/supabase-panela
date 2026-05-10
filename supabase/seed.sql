@@ -83,7 +83,10 @@ ALTER TYPE "public"."vehicle_condition_enum" OWNER TO "postgres";
 -- ============================================================================
 -- FUNCIONES BASE DE SEGURIDAD
 -- Deben estar antes de cualquier política RLS que las use.
+-- Restauramos search_path porque pg_dump lo vacía arriba (línea 9).
+-- Sin esto, los nombres no calificados como auth_cooperative_id() no resuelven.
 -- ============================================================================
+SET search_path TO public, extensions;
 
 CREATE OR REPLACE FUNCTION public.auth_cooperative_id()
 RETURNS uuid

@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem \"C:\\\\Users\\\\bianc\\\\Desktop\\\\proyecto-panela\\\\supabase\\\\mi-proyecto\\\\supabase\" -Recurse)",
+      "Bash(Select-Object FullName, Length)",
+      "Bash(Format-Table -AutoSize)",
+      "PowerShell(Get-Item \"C:\\\\Users\\\\bianc\\\\Desktop\\\\proyecto-panela\\\\supabase\\\\mi-proyecto\\\\supabase\\\\seed.sql\" | Select-Object Name, Length; \\(Get-Content \"C:\\\\Users\\\\bianc\\\\Desktop\\\\proyecto-panela\\\\supabase\\\\mi-proyecto\\\\supabase\\\\seed.sql\" | Measure-Object -Line\\).Lines)",
+      "PowerShell(Get-Content *)"
+    ]
+  }
+}
