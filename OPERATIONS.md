@@ -84,14 +84,62 @@ Hacer estos pasos UNA SOLA VEZ al crear un proyecto nuevo en Supabase:
 Solo si es absolutamente necesario volver a un estado limpio en la nube.
 
 ```
--- En el SQL Editor de Supabase (nube):
-DROP SCHEMA public CASCADE;
-CREATE SCHEMA public;
-GRANT ALL ON SCHEMA public TO postgres;
-GRANT ALL ON SCHEMA public TO public;
+ Reset de la nube paso a paso
+
+  Paso 1 — Borrar el schema en el SQL Editor de Supabase (nube)
+
+  DROP SCHEMA public CASCADE;
+  CREATE SCHEMA public;
+  GRANT ALL ON SCHEMA public TO postgres;
+  GRANT ALL ON SCHEMA public TO public;
+
+  Esto borra absolutamente todo — tablas, funciones, datos, RLS.
+
+  ---
+  Paso 2 — Reaplicar el schema
+
+  Ir a GitHub → Actions → "Deploy to Supabase Pre-prod" → Run workflow
+
+  Esto aplica TODAS las migraciones del repo en orden cronológico (baseline + todas
+  las que hayas subido después). supabase db push detecta que la tabla de migraciones
+  está vacía tras el reset y las re-aplica todas desde cero.
+
+  ---
+  Paso 3 — Seed de datos de referencia
+
+  En el SQL Editor de la nube, pegar y ejecutar el contenido de supabase/seed.sql.
+
+  ---
+  Paso 4 — Crear los admins web
+
+  En el SQL Editor de la nube, pegar y ejecutar supabase/web_admin_seed.sql.
+
+  ---
+  Paso 5 — Reactivar el Auth Hook
+
+  Authentication → Hooks → Custom Access Token → activar custom_access_token_hook
+
+  ---
+  Paso 6 — Verificar los secrets de Edge Functions
+
+  Edge Functions → Manage secrets → confirmar que SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY siguen ahí (normalmente
+  sobreviven al reset del schema).
+
+  ---
+  La diferencia clave con el reset local:
+
+  ┌────────────┬───────────────────┬──────────────────────────────────────┐
+  │            │       Local       │                 Nube                 │
+  ├────────────┼───────────────────┼──────────────────────────────────────┤
+  │ Comando    │ supabase db reset │ Manual — SQL Editor + GitHub Actions │
+  ├────────────┼───────────────────┼──────────────────────────────────────┤
+  │ Riesgo     │ Ninguno           │ Alto si hay datos reales             │
+  ├────────────┼───────────────────┼──────────────────────────────────────┤
+  │ Frecuencia │ Cuando quieras    │ Solo emergencias                     │
+  └────────────┴───────────────────┴──────────────────────────────────────┘
 ```
 
-Luego ejecutar manualmente desde GitHub Actions → Run workflow, y repetir el Setup inicial (punto 4).
+
 
 ---
 
