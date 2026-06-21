@@ -27,10 +27,10 @@ jobs:
           version: latest
 
       - name: Link Supabase project
-        run: supabase link --project-ref bhjpahoxcmqersbqbxpr --password ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: supabase link --project-ref mzebhkgusujujskylzdw --password ${{ secrets.SUPABASE_DB_PASSWORD }}
 
       - name: Apply database migrations
         run: supabase db push
 
       - name: Deploy Edge Functions
-        run: supabase functions deploy --project-ref bhjpahoxcmqersbqbxpr
+        run: supabase functions deploy --project-ref mzebhkgusujujskylzdw
