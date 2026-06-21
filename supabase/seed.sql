@@ -6,9 +6,9 @@
 SET session_replication_role = replica;
 
 -- 1. Cooperativas
-INSERT INTO "public"."cooperatives" ("id","name","code","created_at","updated_at","is_active","cane_density") VALUES
-('550e8400-e29b-41d4-a716-446655440001','Cooperativa Agraria Norandino','NORANDINO','2026-03-10 20:56:08.357766-05','2026-03-10 20:56:08.357766-05',true,1.0500),
-('550e8400-e29b-41d4-a716-446655440002','Cooperativa Agraria Ecológica y Solidaria Piura','CAES','2026-03-10 20:56:08.357766-05','2026-03-10 20:56:08.357766-05',true,1.0500);
+INSERT INTO "public"."cooperatives" ("id","name","code","created_at","updated_at","is_active","cane_density","access_code") VALUES
+('550e8400-e29b-41d4-a716-446655440001','Cooperativa Agraria Norandino','NORANDINO','2026-03-10 20:56:08.357766-05','2026-03-10 20:56:08.357766-05',true,1.0500,'NORA2025'),
+('550e8400-e29b-41d4-a716-446655440002','Cooperativa Agraria Ecológica y Solidaria Piura','CAES','2026-03-10 20:56:08.357766-05','2026-03-10 20:56:08.357766-05',true,1.0500,'CAES2025');
 
 -- 2. Grupos de exclusión de certificados
 INSERT INTO "public"."certificate_exclusion_groups" ("id","name","display_name","description","is_required","cooperative_id","created_at","updated_at","is_active") VALUES

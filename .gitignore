@@ -1,6 +1,12 @@
 # SQL de prueba local — nunca van a la nube
 supabase/scratch/
+supabase/test_seed.sql
+supabase/test_dual_role_seed.sql
 
-# Supabase
+# Supabase internals
 supabase/.temp/
 supabase/.env
+supabase/.branches/
+
+# Claude Code settings locales
+.claude/
