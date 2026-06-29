@@ -6,6 +6,8 @@
 -- extrae server-side con EXTRACT(YEAR FROM p_process_date).
 -- =============================================================================
 
+DROP FUNCTION IF EXISTS public.get_producer_quota_statuses(uuid, date);
+
 CREATE OR REPLACE FUNCTION public.get_producer_quota_statuses(
   p_producer_id  uuid,
   p_process_date date DEFAULT CURRENT_DATE
