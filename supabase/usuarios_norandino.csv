@@ -1,0 +1,124 @@
+Nombres *,Apellido paterno,Apellidos Materno,DNI *  (8 digitos),Rol ,Modulo 
+Alcivar,Abad,Cordova,03103434,admin_modulo,Cataratas de Limón
+Antenor,Abad,Culquicondor,48056611,admin_modulo,Mi Cautivo
+Arsalio,Aniceto,Chamba,47865597,admin_modulo,El Aniceto
+Eulalio,Aniceto,Vasquez,03100220,admin_modulo,Jesus el camino
+Sebastian,Castillo,Huanca,03097267,productor,Appagrop Jilili
+Cesar Augusto,Chinchay,Espinoza,43947198,admin_modulo,La Melchorita
+Gabino,Chinchay,Mija,47755270,admin_modulo,Fundo Chinchay
+Pedro,Cordova,Chamba,03101538,productor,San Pedro
+Afrodicio,Cordova,Rea,45427360,productor,San Pedro
+Hipolito,Cordova,Rea,42396540,productor,San Pedro
+Jose Confesor,Cordova,Rea,42037856,admin_modulo,San Pedro
+Almilcar,Cordova,Saguma,42651825,admin_modulo,El Chavo
+Bacilio,Cruz,Morocho,03102853,productor,Asoc Flor de caña
+Jose,Culqicondor,Vasquez,46966969,admin_modulo,Dios es Amor
+Anaximandro,Farfan,Marchan,02645099,admin_modulo,San Antonio de Padua
+Avilio,Farfan,Marchan,03100105,productor,San Antonio de Padua
+Sabino,Guerrero,Correa,03101715,admin_modulo,El Nogal
+Milton,Herrera,Alberca,47217869,admin_modulo,Los  Herrera
+Natividad,Juarez,Navarro,80333458,productor,Cataratas de Limón
+Regulo,Mijahuanga,Maza,02771828,productor,Appagrop Jilili
+Duberly,Niño,Merino,42879754,admin_modulo,Flor de Caña
+Silvino,Pardo,Abad,03128655,productor,Asoc Flor de caña
+Jorge,Parrilla,San Martin,03099742,admin_modulo,Pan de Azucar
+Teofilo,Pinta,Mija,80440237,productor,Appagrop Jilili
+Victorino,Portocarrero,Chuquihuanga,03097955,productor,Mi lindo Belen
+Ramos,Abad,Morocho,03097656,admin_modulo,San Pedro de seguiche
+Pedro Pablo,Rivera,Giron,03096997,productor,Appagrop Jilili
+Wilmer,Sanchez,Niño,03102852,productor,Asoc Flor de caña
+Serafin,Medina,Cunyarache,44464818,admin_modulo,El Checo
+Delmer,Soto,Rivera,44271269,admin_modulo,Mi lindo Belen
+Oscar,Yangua,Calle,42633120,productor,Divino Jesus
+Rodolfo Gilberto,Yangua,Chamba,03089281,admin_modulo,Divino Jesus
+Elfer,Yangua,Rios,46033683,productor,Asoc Flor de caña
+Francisco,Yangua,Valle,03101595,productor,Asoc Flor de caña
+Segundo Polidoro,Maza,Portocarrero,07621970,admin_modulo,Don Polo
+Jose Elias,Berru,Yanayaco,42615192,productor,Appagrop Jilili
+Israel,Cordova,Chininin,80450990,productor,Cataratas de Limón
+Salazar,Culquicondor,Valle,03097689,productor,Cataratas de Limón
+Herlandes,Campos,Cordova,03103003,productor,Cataratas de Limón
+Edwuar,Flores,Calle,44894036,admin_modulo,Los Flores
+Arimeldes,Niño,Rios,80336961,admin_modulo,Los Hermanos Niño
+Bartolo,Ordoñes,Correa,03598688,productor,San Antonio de Padua
+Holguin,Rios,Vicente,42668723,productor,Asoc Flor de caña
+Esban,Timoteo,Chinchay,03112614,admin_modulo,Appagrop Jilili
+Julio,Vicente,Encalada,03096470,productor,Appagrop Jilili
+Hector Raul,Herrera,Alberca,48472088,productor,Los herrera
+Lider,Neyra,Saavedra,03110877,admin_modulo,Rosita y Polito
+Bladimiro,Medina,Paucar,80376773,admin_modulo,Cuatro Reynas
+Segundo Isaias,Culquicondor,Cunya,03090543,admin_modulo,Manos Unidas
+Jilmer Leonel,Abad,Valencia,45014680,productor,El Hueco
+Romel Gabriel,Villavicencio,Lazo,03096616,productor,Appagrop Jilili
+Marleny del Socorro,Alvarado,Saguma,03096883,productor,Appagrop Jilili
+Pedro Pablo,Alvarado,Jimenez,03112606,productor,Appagrop Jilili
+Wilmer,Chininin,Pintado,03102898,productor,Asoc Flor de caña
+Patrocinia,Jimenez,Vicente,80550593,productor,Asoc Flor de caña
+Rolando,Campos,Cordova,80525537,productor,Cataratas de Limón
+Elber,Chinchay,Guerrero,47434245,admin_modulo,Los Gemelos
+Darwin,Morocho,Rosales,42496406,admin_modulo,San Francisco
+Renelmo,Tocto,Alberca,44269205,productor,Niño Tocto
+Ivan,Niño,Soto,46558684,admin_modulo,Niño Tocto
+Rolando,Tocto,Alberca,46078661,productor,Niño Tocto
+Serbulo Jose,Marchan,Culquicondor,41951208,admin_modulo,Getsemani
+Carlos,Cruz,Morocho,03128720,productor,Asoc Flor de caña
+Humberto,Portocarrero,Torres,80376755,productor,Cuatro Reynas
+Alvaro,Chinchay,Espinosa,48587780,productor,La Melchorita
+Filadelfo,Flores,Saavedra,80485588,productor,Asoc Flor de caña
+Juan,Rondoy,Maza,03097304,admin_modulo,Juan Angel
+Arnoldo,Correa,Yangua,03097749,productor,Niño Jesus
+Aureliano,Rivera,Portocarrero,03097950,admin_modulo,El Papayal
+Guillermo,Berru,Calle,41469245,admin_modulo,Cruz de Silahua Frias
+Joel,Berru,Calle,45228736,productor,Cruz de Silahua Frias
+Manuel,Yangua,Chinchay,80451731,admin_modulo,San Francisco de la Chorrera
+Francisco,Chininin,Yangua,03128746,productor,Asoc Flor de caña
+Adelmo,Campos,Cordova,03122274,productor,Cataratas de Limón
+Felicino,Marchan,Culquicondor,03103044,productor,Getsemani
+Maximo,Yangua,Sarango,03101497,productor,Cataratas de Limón
+Dorinda,Huaman,de Huacchillo,03111364,productor,Rosita y Polito
+Segundo Modesto,Abad,Valencia,46639962,admin_modulo,El Hueco
+Confesor,Maldonado,Huanca,03112634,productor,Mi lindo Belen
+Misael,Culquicondor,Giron,43642999,productor,El Hueco
+Tito,Cardenas,Portocarrero,43171707,admin_modulo,Virgen del Cisne
+Patricio,Silva,Guerrero,03100556,productor,Asoc Flor de caña
+Edwin Martin,Quinde,Criollo,42831629,productor,Appagrop Jilili
+Arcadio,Rios,Jabo,03102855,productor,Asoc Flor de caña
+Felix,Chamba,Yangua,03089297,productor,Divino Jesus
+Hedil,Correa,Niño,41952266,productor,Niño Jesus
+Melber,Correa,Niño,43164788,admin_modulo,Niño Jesus
+Francisco,Ocampos,Giron,02863613,productor,Los Herrera
+Pedro,Valle,Pardo,03107898,productor,Asoc Flor de caña
+Segundo Hilario,Yangua,Chuquicondor,44950927,admin_modulo,Dios Divino
+Alexander ,Niño,Correa,42565433,productor,Fundo Chinchay
+Anibal,Niño,Abad,03103597,admin_modulo,El Anibal
+Brayam,Niño,Abad,76444959,productor,Fundo Chinchay
+Cristian Anderson,Balarezo ,Marchan,70016320,productor,El Nogal
+Robert Charles,Culquicondor ,Avila,42108534,productor,Los Hermanos Niño
+Eber,Rivera,Aguilar,80666083,productor,Fundo Chinchay
+Indalecio,Aguilar,Niño,03102374,productor,Fundo Chinchay
+Martin ,Parrilla,Vasquez,46681671,productor,El Nogal
+Etelvina,Rios,Jabo,03879126,productor,Asoc Flor de caña
+Valerio,Chinchay,Niño,03101523,productor,Fundo Chinchay
+Sabino,Yangua ,Chinchay,43947154,productor,Fundo Chinchay
+Manuel ,Mendez,Jimenez,76358227,admin_modulo,Podero Cautivo
+Eduar,Yangua,Valle,77919171,productor,Dios Divino
+Draucin,Pardo ,Abad,45170278,admin_modulo,Asoc Flor de caña
+Jose Felizardo,Abad,Robledo,03127188,productor,Divino Jesus
+Elena ,Jimenez,Yangua,43947145,productor,Asoc Flor de caña
+Alicia ,Chininin,Rondoy,48591655,productor,Asoc Flor de caña
+Jheyson Jhoan,Morocho,Chinchay,45406637,admin_modulo,San Francisco
+Lilia Del Carmen ,Chininin ,De Rios,03100765,productor,Asoc Flor de caña
+Wilson,Tocto,Campoverde,43501140,admin_modulo,La Vega
+Ofelia,Cortez,Rivera,02806045,productor,Cuatro Reynas
+Franklin ,Yanayaco ,Mijahuanga,03112218,productor,San Marcos de Sicchez
+Nelso,Villalta,Ulloa,03111354,productor,San Marcos de Sicchez
+Domingo,Llacsahuanga,Rivera,02803982,admin_modulo,San Marcos de Sicchez
+Waldir Dennis,Yanayaco ,Valencia,73688715,productor,San Marcos de Sicchez
+Fidel ,Reyes ,Lloclla,03099717,productor,San Marcos de Sicchez
+Senecio,Reyes ,Liviapoma,03110639,productor,San Marcos de Sicchez
+Indalecio,Yanayaco,Mijahuanga,03112220,productor,San Marcos de Sicchez
+Jorge Raul,Jimenez,Troncos,03110661,productor,San Marcos de Sicchez
+Pascual,Llapapasca,Ulloa,03099598,productor,San Marcos de Sicchez
+Manuel,Cueva ,Rivera,03084424,productor,Manos Unidas
+Elvira ,Abad,Rosillo,03081157,productor,Manos Unidas
+Amaro,Herrera,Abad,03087351,productor,Manos Unidas

@@ -109,4 +109,31 @@ INSERT INTO "public"."form_configurations" ("cooperative_id", "step_key", "field
   {"key":"merma_threshold_pct","label":"Umbral merma esperada (%)","type":"number","required":false,"min":0,"max":100,"default":5,"order":1}
 ]');
 
+-- 5. Configuración de vida útil por cooperativa
+-- Requerida por el código para calcular la fecha de vencimiento automáticamente
+-- (calcBestBeforeDate en OrdenesPage.jsx). Movida acá desde la migración
+-- 20260515160000: es por-cooperativa (no NULL/global como las de arriba), así
+-- que necesita que "cooperatives" ya tenga filas -- por eso va en seed.sql,
+-- que corre después de las migraciones, no en una migración.
+-- default_months: meses base para todas las presentaciones.
+-- overrides: primer match por texto en presentación gana.
+INSERT INTO "public"."form_configurations" ("cooperative_id", "step_key", "fields") VALUES
+('550e8400-e29b-41d4-a716-446655440001', 'shelf_life_config', '[
+  {"key":"default_months","label":"Vida útil por defecto (meses)","type":"number","default":18},
+  {"key":"overrides","label":"Excepciones por presentación","type":"json","default":[
+    {"presentation_contains":"25 kg","months":12},
+    {"presentation_contains":"50 kg","months":12},
+    {"presentation_contains":"saco","months":12}
+  ]}
+]'),
+('550e8400-e29b-41d4-a716-446655440002', 'shelf_life_config', '[
+  {"key":"default_months","label":"Vida útil por defecto (meses)","type":"number","default":18},
+  {"key":"overrides","label":"Excepciones por presentación","type":"json","default":[
+    {"presentation_contains":"25 kg","months":12},
+    {"presentation_contains":"50 kg","months":12},
+    {"presentation_contains":"saco","months":12}
+  ]}
+]')
+ON CONFLICT DO NOTHING;
+
 RESET ALL;
