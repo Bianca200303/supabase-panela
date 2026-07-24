@@ -22,7 +22,7 @@ Esto aplica en orden:
 
 Si además querés usuarios de prueba (móvil y web) en local, correr manualmente en el SQL Editor de `http://localhost:54323` (o con `psql`) el contenido de `supabase/test_seed.sql` — ver sección "Creación de usuarios" más abajo.
 
-También conviene revisar la sección "Catálogos y datos de referencia por cooperativa" más abajo — en particular, marcas y presentaciones probablemente queden vacías tras el reset.
+También conviene revisar la sección "Catálogos y datos de referencia por cooperativa" más abajo — en particular, marcas probablemente queden vacías tras el reset.
 
 ---
 
@@ -107,9 +107,10 @@ Cuando ya no se quiere usar `test_seed.sql` (contraseñas obvias, datos ficticio
 
 - **`supabase/modules_seed.sql`** — los `coop_modules` reales. Norandino: 42 módulos reales (reemplazan los 10 placeholder de `test_seed.sql`, tomados de `usuarios_norandino.csv`). CAES: todavía los 10 de `test_seed.sql`, sin confirmar como reales — pendiente de una lista real cuando se retome esa cooperativa.
 - **`supabase/real_users_seed.sql`** — admins web + usuarios móvil reales, mismo patrón (`auth.users` + `web_users` para web; `public.users` + `setup_dni_user_auth` para móvil), con nombres/DNIs/credenciales reales. Hoy solo Norandino (123 personas + 1 admin web + 1 admin sistema + 2 técnicos inventados). Incluye 3 parcelas por productor.
-- **`supabase/catalogs_seed.sql`** — marcas y presentaciones (`plant_brand_catalog`/`plant_presentation_catalog`), ver sección de catálogos más abajo.
+- **`supabase/catalogs_seed.sql`** — marcas placeholder (`plant_brand_catalog`) para cooperativas sin lista real todavía; excluye a Norandino. Ver sección de catálogos más abajo.
 - **`supabase/certified_workers_seed.sql`** — plantilla con nombres falsos, 1 por cada uno de los 42 módulos reales de Norandino (comentario indica a qué módulo corresponde cada fila) — reemplazar nombres cuando llegue la lista real.
 - **`supabase/quotas_seed.sql`** — plantilla con cupo_kg/year falsos (5000 kg, 2026) para los 80 productores reales de Norandino, certificación Orgánica — reemplazar por los valores reales.
+- **`supabase/norandino/`** — clientes/importadores reales (con defaults de presentación), marcas reales, y catálogo de productos (SKU) reales de Norandino. Ver sección de catálogos más abajo.
 
 ### CAES — todo de prueba (sin datos reales todavía)
 
@@ -117,7 +118,7 @@ Carpeta aparte `supabase/caes/`, mismo criterio que Norandino pero 100% con dato
 
 1. `caes/modules_caes.sql` — los 10 módulos de CAES (ya existían en `modules_seed.sql`, extraídos acá aparte).
 2. `caes/users_caes.sql` — admin web (`admincaes`/`admincaes`), admin_sistema, 2 técnicos, 10 admin_modulo (1 por módulo) y 30 productores (3 por módulo, con 3 parcelas cada uno) — todos falsos.
-3. `caes/catalogs_caes.sql` — marcas/presentaciones para CAES (mismo contenido que `catalogs_seed.sql`, filtrado explícito a CAES; si ya corriste el compartido, este no inserta nada nuevo).
+3. `caes/catalogs_caes.sql` — marcas placeholder para CAES (mismo contenido que `catalogs_seed.sql`, filtrado explícito a CAES; si ya corriste el compartido, este no inserta nada nuevo).
 4. `caes/certified_workers_caes.sql` — 1 trabajador falso por módulo.
 5. `caes/quotas_caes.sql` — cupo falso (3000 kg, 2026, Orgánica) para los 30 productores de prueba.
 
@@ -140,20 +141,28 @@ Después de un reset (local o nube) o al dar de alta una cooperativa nueva, esto
 |---|---|---|---|
 | Trabajadores certificados | `certified_workers` | No — solo SQL | `CERTIFIED_WORKERS.md` + `supabase/certified_workers_seed.sql` (plantilla, nombres falsos) |
 | Cupos por productor | `producer_quotas` | No — solo SQL (todavía) | `QUOTA_SYSTEM.md` + `supabase/quotas_seed.sql` (plantilla, cupo falso) |
-| Clientes | `plant_clients` | **Sí** — se crea desde `OrdenesPage.jsx` | No hace falta SQL |
-| Marcas | `plant_brand_catalog` | No — solo SQL | `supabase/catalogs_seed.sql` |
-| Presentaciones | `plant_presentation_catalog` | No — solo SQL, ni siquiera se lee en la web todavía | `supabase/catalogs_seed.sql` |
+| Clientes (+ defaults de presentación) | `plant_clients` | **Sí** — alta, edición de `default_*` y activar/desactivar, todo desde `OrdenesPage.jsx` ("Clientes") | Norandino real: `supabase/norandino/clientes_norandino.sql` |
+| Marcas | `plant_brand_catalog` | **Sí** — alta y activar/desactivar desde `OrdenesPage.jsx` ("Marcas") | Placeholder: `supabase/catalogs_seed.sql` (excluye Norandino). Norandino real: `supabase/norandino/catalogo_marcas_norandino.sql` |
+| Catálogo de productos (SKU/CODPROD) | `plant_product_catalog` | **Sí** — se elige/crea al agregar un lote de envasado (no a nivel de orden: un mismo pedido puede combinar varios productos/presentaciones) | Norandino real: `supabase/norandino/productos_norandino.sql` |
 
-### ⚠️ Marcas y presentaciones — probablemente quedan vacías tras un reset
+> `plant_presentation_catalog` existió pero se eliminó en `20260722170000_client_defaults_and_product_catalog.sql`: nunca se llegó a leer desde ningún frontend, y su función la cubren ahora `plant_clients.default_*` + `plant_product_catalog.packaging_kg`.
 
-La migración `20260712144100_create_presentation_brand_catalogs.sql` intenta pre-cargar marcas/presentaciones por defecto para Norandino y CAES con un `INSERT ... SELECT ... FROM cooperatives CROSS JOIN (...)`. El problema: **las migraciones corren TODAS antes que `seed.sql`** (ver sección 1), y `cooperatives` recién se llena en `seed.sql`. O sea que en un `db reset` de verdad desde cero, esa migración se ejecuta contra una tabla `cooperatives` todavía vacía → el `INSERT` no inserta nada, aunque el comentario de la migración diga que sí.
+### ⚠️ Marcas — probablemente quedan vacías tras un reset
 
-**Después de cada reset, verificar** si estas tablas tienen filas:
+La migración `20260712144100_create_presentation_brand_catalogs.sql` intenta pre-cargar marcas por defecto para Norandino y CAES con un `INSERT ... SELECT ... FROM cooperatives CROSS JOIN (...)`. El problema: **las migraciones corren TODAS antes que `seed.sql`** (ver sección 1), y `cooperatives` recién se llena en `seed.sql`. O sea que en un `db reset` de verdad desde cero, esa migración se ejecuta contra una tabla `cooperatives` todavía vacía → el `INSERT` no inserta nada, aunque el comentario de la migración diga que sí.
+
+**Después de cada reset, verificar** si la tabla tiene filas:
 ```sql
 SELECT cooperative_id, count(*) FROM plant_brand_catalog GROUP BY 1;
-SELECT cooperative_id, count(*) FROM plant_presentation_catalog GROUP BY 1;
 ```
-Si salen vacías, correr `supabase/catalogs_seed.sql` a mano (mismo contenido que traía la migración, separado en su propio archivo de carga manual). Esa es la lista por defecto (2026-07-12) — todavía no confirmada como real; reemplazar el contenido de ese archivo cuando llegue la lista real de marcas/presentaciones de cada cooperativa.
+Si sale vacía: para Norandino, correr `supabase/norandino/catalogo_marcas_norandino.sql` (lista real, 2 marcas). Para cualquier otra cooperativa sin lista real todavía, correr `supabase/catalogs_seed.sql` a mano (placeholder de 2026-07-12, reemplazar cuando llegue su lista real).
+
+Para Norandino, además de marcas, cargar (en este orden, cada uno a mano cuando decidas hacerlo):
+```
+1. supabase/norandino/clientes_norandino.sql          -- clientes + sus defaults
+2. supabase/norandino/catalogo_marcas_norandino.sql    -- marcas reales
+3. supabase/norandino/productos_norandino.sql          -- catálogo de productos (depende de 1 y 2)
+```
 
 ---
 
@@ -192,8 +201,8 @@ Solo si es absolutamente necesario volver a un estado limpio en la nube.
 
   Ver sección "Creación de usuarios" más arriba: supabase/test_seed.sql para un
   entorno de pruebas, o alta manual vía Edge Functions si son usuarios reales.
-  También revisar "Catálogos y datos de referencia por cooperativa" (marcas y
-  presentaciones probablemente queden vacías, ver esa sección).
+  También revisar "Catálogos y datos de referencia por cooperativa" (marcas
+  probablemente queden vacías, ver esa sección).
 
   ---
   Paso 5 — Reactivar el Auth Hook

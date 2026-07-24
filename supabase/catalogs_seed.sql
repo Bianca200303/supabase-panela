@@ -1,6 +1,5 @@
 -- ============================================================
--- CATÁLOGOS de planta: marcas y presentaciones (plant_brand_catalog,
--- plant_presentation_catalog), por cooperativa.
+-- CATÁLOGOS de planta: marcas (plant_brand_catalog), por cooperativa.
 --
 -- Estos datos vivían embebidos en la migración
 -- 20260712144100_create_presentation_brand_catalogs.sql como un INSERT
@@ -14,33 +13,21 @@
 -- modules_seed.sql / real_users_seed.sql), en vez de depender de que la
 -- migración lo resuelva sola.
 --
--- ⚠️ Los valores de abajo son los que YA estaban hardcodeados en la
--- migración -- probablemente placeholder, no confirmados como reales
--- todavía. Reemplazar cuando lleguen las listas reales de marcas y
--- presentaciones de cada cooperativa.
+-- ⚠️ Norandino queda EXCLUIDA del CROSS JOIN de abajo: ya tiene su propia
+-- lista real de marcas confirmada (ver supabase/norandino/catalogo_norandino.sql
+-- -- NORANDINO y AYPATE, no las 5 placeholder que había acá). El resto de
+-- cooperativas sin lista real todavía siguen recibiendo este placeholder
+-- (2026-07-12) hasta que llegue la suya.
+--
+-- Se eliminó también el INSERT de plant_presentation_catalog: esa tabla se
+-- borró en 20260722170000_client_defaults_and_product_catalog.sql (nunca se
+-- llegó a leer desde ningún frontend; su función la cubre ahora
+-- plant_clients.default_* + plant_product_catalog).
 --
 -- Carga manual: correr después de seed.sql (necesita que cooperatives ya
 -- tenga filas), en cualquier orden respecto a modules_seed.sql /
 -- real_users_seed.sql (no dependen entre sí).
 -- ============================================================
-
-INSERT INTO public.plant_presentation_catalog (cooperative_id, label)
-SELECT c.id, p.label
-FROM public.cooperatives c
-CROSS JOIN (VALUES
-  ('Polvo 500 g'),
-  ('Polvo 1 kg'),
-  ('Polvo 25 kg (saco)'),
-  ('Piloncillo 400 g'),
-  ('Bloque 500 g'),
-  ('Caja 500 g × 10 und'),
-  ('Caja 500 g × 20 und'),
-  ('Caja 1 kg × 10 und'),
-  ('Bolsa 5 kg'),
-  ('Saco 25 kg'),
-  ('Saco 50 kg')
-) AS p(label)
-ON CONFLICT (cooperative_id, label) DO NOTHING;
 
 INSERT INTO public.plant_brand_catalog (cooperative_id, label)
 SELECT c.id, b.label
@@ -52,4 +39,5 @@ CROSS JOIN (VALUES
   ('NaturPanela'),
   ('Andean Sweet')
 ) AS b(label)
+WHERE c.id <> '550e8400-e29b-41d4-a716-446655440001' -- Norandino: tiene lista real propia
 ON CONFLICT (cooperative_id, label) DO NOTHING;
