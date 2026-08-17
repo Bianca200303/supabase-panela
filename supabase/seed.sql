@@ -97,7 +97,6 @@ INSERT INTO "public"."form_configurations" ("cooperative_id", "step_key", "field
 -- Despacho: campos de registro
 (NULL, 'despacho', '[
   {"key":"dispatch_date","label":"Fecha de despacho","type":"date","required":true,"order":1},
-  {"key":"total_loaded_kg","label":"Peso total cargado (kg)","type":"number","required":true,"min":0,"order":2},
   {"key":"seal_verified","label":"Sello verificado al cerrar","type":"checkbox","required":false,"default":false,"order":3},
   {"key":"temperature_at_load","label":"Temperatura al cargar (°C)","type":"number","required":false,"order":4},
   {"key":"humidity_at_load","label":"Humedad relativa al cargar (%)","type":"number","required":false,"min":0,"max":100,"order":5},
