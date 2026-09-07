@@ -11,6 +11,20 @@ serve(async (req)=>{
     });
   }
   try {
+    // Verify caller is authenticated
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader) {
+      return new Response(JSON.stringify({
+        error: 'No autorizado'
+      }), {
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json'
+        },
+        status: 401
+      });
+    }
+    const supabaseAdmin = createClient(Deno.env.get('SUPABASE_URL') ?? '', Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '');
     const { username, password, firstName, lastName, role, cooperativeId } = await req.json();
     if (!username || !password || !firstName || !lastName || !cooperativeId) {
       return new Response(JSON.stringify({
@@ -23,7 +37,67 @@ serve(async (req)=>{
         status: 400
       });
     }
-    const supabaseAdmin = createClient(Deno.env.get('SUPABASE_URL') ?? '', Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '');
+    // Verify caller identity via JWT
+    const callerClient = createClient(Deno.env.get('SUPABASE_URL') ?? '', Deno.env.get('SUPABASE_ANON_KEY') ?? '', {
+      global: {
+        headers: {
+          Authorization: authHeader
+        }
+      }
+    });
+    const { data: { user: callerUser }, error: callerAuthError } = await callerClient.auth.getUser();
+    if (callerAuthError || !callerUser) {
+      return new Response(JSON.stringify({
+        error: 'Token inválido'
+      }), {
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json'
+        },
+        status: 401
+      });
+    }
+    // Verify caller is an admin_web of the cooperative they are registering into
+    const { data: callerProfile } = await supabaseAdmin.from('web_users').select('role, cooperative_id').eq('auth_user_id', callerUser.id).single();
+    if (callerProfile?.role !== 'admin_web') {
+      return new Response(JSON.stringify({
+        error: 'Solo un administrador puede crear usuarios web'
+      }), {
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json'
+        },
+        status: 403
+      });
+    }
+    if (callerProfile.cooperative_id !== cooperativeId) {
+      return new Response(JSON.stringify({
+        error: 'No puedes registrar usuarios en otra cooperativa'
+      }), {
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json'
+        },
+        status: 403
+      });
+    }
+    // Validate role against known values -- never trust an arbitrary string
+    const validRoles = [
+      'admin_web',
+      'operador'
+    ];
+    const targetRole = role ?? 'operador';
+    if (!validRoles.includes(targetRole)) {
+      return new Response(JSON.stringify({
+        error: 'Rol inválido. Debe ser admin_web u operador'
+      }), {
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json'
+        },
+        status: 400
+      });
+    }
     // Check username not already taken in this cooperative
     const { data: existing } = await supabaseAdmin.from('web_users').select('id').eq('username', username).eq('cooperative_id', cooperativeId).single();
     if (existing) {
@@ -75,7 +149,7 @@ serve(async (req)=>{
       username,
       first_name: firstName,
       last_name: lastName,
-      role: role ?? 'recepcionista'
+      role: targetRole
     });
     if (insertError) {
       // Rollback: delete auth user
