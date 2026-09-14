@@ -2,6 +2,11 @@
 supabase/scratch/
 supabase/test_seed.sql
 supabase/test_dual_role_seed.sql
+supabase/crear_admin_caes.sql
+
+# Consultas guardadas por el editor SQL de Supabase Studio (local) --
+# historial personal, no contenido del proyecto.
+supabase/snippets/
 
 # Supabase internals
 supabase/.temp/
