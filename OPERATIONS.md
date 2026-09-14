@@ -129,7 +129,8 @@ Igual que `test_seed.sql`: **carga manual en los dos entornos** (no se agregan a
 ### Alta de un usuario real, uno por uno
 
 - **Móvil** → Edge Function `register-user`. La invoca un admin ya logueado desde la app móvil (requiere JWT de un `admin_sistema`/`admin_modulo` existente — no sirve para el primer usuario de un cooperativa nueva, hace falta al menos un admin ya creado por otra vía).
-- **Web** → Edge Function `register-web-user`. ⚠️ A diferencia de `register-user`, esta función **no valida quién la llama** (no chequea token ni rol, solo los datos del body) — pensada para invocarla manualmente (curl/Postman) durante el setup, no para exponerla sin más control. Si se va a usar en producción con usuarios reales, conviene revisar/agregarle un chequeo de rol antes.
+- **Web** → Edge Function `register-web-user`. La invoca un `admin_web` ya logueado desde `UsersPage` (requiere JWT de un `admin_web` existente de esa misma cooperativa — mismo candado que `register-user`, no sirve para el primer usuario de una cooperativa nueva).
+- **Primer `admin_web` de una cooperativa nueva** (bootstrap, sin nadie logueado todavía) → no pasa por ningún endpoint HTTP. Se crea directo por SQL en el SQL Editor, igual que el resto de datos de setup — ver el patrón en `supabase/real_users_seed.sql` (`create_auth_user_for_dni`-style INSERT en `auth.users` + `INSERT INTO public.web_users ... role = 'admin_web'`).
 
 ---
 
