@@ -12,9 +12,19 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 // llamador externo. Lo único que sale es lo que arma explícitamente el
 // SELECT de más abajo: nunca las tablas completas.
 //
+// La base de datos es compartida por las 2 cooperativas (fila con
+// cooperative_id, no un proyecto de Supabase por cooperativa) -- así que
+// CUALQUIER consulta acá tiene que filtrar por cooperative_id o devuelve
+// datos de ambas mezclados. Como el llamador es un sistema externo (no un
+// usuario con JWT), no hay auth_cooperative_id() disponible -- en su lugar,
+// cada deploy de esta función fija su propia cooperativa vía el secreto
+// COOPERATIVE_ID (mismo patrón que VITE_COOPERATIVE_ID en el frontend: un
+// deploy = una cooperativa).
+//
 // El SELECT de ejemplo es un placeholder -- reemplazarlo por la consulta
-// real una vez que se sepa exactamente qué datos necesita el otro sistema.
-// La capa de seguridad (API key + service_role interno) no cambia.
+// real una vez que se sepa exactamente qué datos necesita el otro sistema,
+// pero el .eq('cooperative_id', cooperativeId) de abajo tiene que quedarse
+// en cualquier consulta que lo reemplace.
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -31,6 +41,9 @@ serve(async (req) => {
     if (!expectedKey) return error(500, 'Falta configurar el secreto EXTERNAL_API_KEY en esta función');
     if (!apiKey || apiKey !== expectedKey) return error(401, 'API key inválida o faltante');
 
+    const cooperativeId = Deno.env.get('COOPERATIVE_ID');
+    if (!cooperativeId) return error(500, 'Falta configurar el secreto COOPERATIVE_ID en esta función');
+
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL'),
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY'),
@@ -38,11 +51,13 @@ serve(async (req) => {
 
     // ── Placeholder: reemplazar por la consulta real cuando se defina ──────
     // Ejemplo: solo órdenes completadas, con una forma curada (no la tabla
-    // completa ni columnas internas).
+    // completa ni columnas internas). El filtro por cooperative_id es
+    // obligatorio en cualquier consulta que reemplace a esta.
     const { data, error: dbErr } = await supabase
       .from('plant_orders')
       .select('order_code, market, status, total_kg')
-      .eq('status', 'completado');
+      .eq('status', 'completado')
+      .eq('cooperative_id', cooperativeId);
 
     if (dbErr) throw new Error(dbErr.message);
 
