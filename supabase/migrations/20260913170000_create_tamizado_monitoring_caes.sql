@@ -10,9 +10,15 @@
 -- deformaciones, sin obstrucciones), con desviación Sí/No + causa raíz +
 -- acciones correctivas si aplica. No hay cabecera de "control" que agrupe
 -- varias filas (a diferencia de los controles de Fase 1) -- por eso es una
--- sola tabla, sin tabla padre. N° de lote es texto libre (no FK): en el
--- papel real corresponde al lote de materia prima que pasa por el tamiz en
--- ese momento, no al lote de envasado de planta.
+-- sola tabla, sin tabla padre.
+--
+-- CORRECCIÓN (ver 20260916100000): el N° de lote de este papel es el LOTE
+-- DE ENVASADO (plant_production_batches), no materia prima -- el
+-- comentario original de esta línea estaba equivocado. Se confirmó
+-- decodificando el propio código (formato DDD+YY+NNN, día juliano + año +
+-- correlativo anual) contra las fechas manuscritas del papel, y porque
+-- CPR-007 (Hermeticidad de Envases, inequívocamente producto envasado)
+-- comparte los mismos códigos de lote en las mismas fechas.
 -- =============================================================================
 
 CREATE TABLE public.plant_sieve_monitoring_caes (

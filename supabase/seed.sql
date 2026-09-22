@@ -135,4 +135,136 @@ INSERT INTO "public"."form_configurations" ("cooperative_id", "step_key", "field
 ]')
 ON CONFLICT DO NOTHING;
 
+-- Verificación de Limpieza (CAES): catálogo de áreas/ítems propio. Movida acá
+-- desde la migración 20260913150000_verificacion_limpieza_areas_caes.sql por
+-- el mismo motivo que "shelf_life_config" arriba: es por-cooperativa, así que
+-- necesita que "cooperatives" ya tenga filas.
+INSERT INTO "public"."form_configurations" ("cooperative_id", "step_key", "fields", "is_active") VALUES
+('550e8400-e29b-41d4-a716-446655440002', 'verificacion_limpieza_areas', '[
+  {
+    "key": "areas",
+    "label": "Áreas",
+    "type": "grouped-list",
+    "required": true,
+    "order": 1,
+    "options": [
+      { "area": "Recepción", "items": [
+        { "code": "paredes_techo", "label": "Paredes y Techo" },
+        { "code": "pisos_ventanas", "label": "Pisos y ventanas" },
+        { "code": "porton_puertas", "label": "Portón - puertas" },
+        { "code": "parihuelas_tachos", "label": "Parihuelas y tachos de basura" },
+        { "code": "personal", "label": "Personal *" },
+        { "code": "presencia_plagas", "label": "Presencia o signos de plagas" }
+      ] },
+      { "area": "Almacén de Materia Prima", "items": [
+        { "code": "paredes", "label": "Paredes" },
+        { "code": "puertas_ventanas_mallas", "label": "Puertas, ventanas y mallas" },
+        { "code": "pisos_techo", "label": "Pisos y techo" },
+        { "code": "balanza_plataforma", "label": "Balanza plataforma" },
+        { "code": "parihuelas", "label": "Parihuelas" },
+        { "code": "personal", "label": "Personal *" },
+        { "code": "presencia_plagas", "label": "Presencia o signos de plagas" }
+      ] },
+      { "area": "Tamizado, Homogenizado y Envasado", "items": [
+        { "code": "paredes_pisos_canaletas", "label": "Paredes, pisos y canaletas" },
+        { "code": "techo", "label": "Techo" },
+        { "code": "zarandas_bunques", "label": "Zarandas y bunques" },
+        { "code": "parihuelas", "label": "Parihuelas" },
+        { "code": "utensilios", "label": "Utensilios" },
+        { "code": "balanza_plataforma", "label": "Balanza plataforma" },
+        { "code": "personal", "label": "Personal *" },
+        { "code": "presencia_plagas", "label": "Presencia o signos de plagas" }
+      ] },
+      { "area": "Almacén de Producto Terminado", "items": [
+        { "code": "paredes_pisos_techo", "label": "Paredes, pisos y techo" },
+        { "code": "puertas_ventanas", "label": "Puertas y ventanas" },
+        { "code": "parihuelas", "label": "Parihuelas" },
+        { "code": "personal", "label": "Personal *" },
+        { "code": "presencia_plagas", "label": "Presencia o signos de plagas" }
+      ] },
+      { "area": "Almacén de Materiales e Insumos", "items": [
+        { "code": "paredes_pisos_techo", "label": "Paredes, pisos, techo" },
+        { "code": "puertas_ventanas", "label": "Puertas y ventanas" },
+        { "code": "parihuelas", "label": "Parihuelas" },
+        { "code": "anaqueles_estantes", "label": "Anaqueles o estantes" },
+        { "code": "presencia_plagas", "label": "Presencia o signos de plagas" }
+      ] },
+      { "area": "Laboratorio", "items": [
+        { "code": "paredes_pisos_techo", "label": "Paredes, pisos, techo" },
+        { "code": "puertas_ventanas", "label": "Puertas y ventanas" },
+        { "code": "utensilios", "label": "Utensilios" },
+        { "code": "material_vidrio", "label": "Material de vidrio" },
+        { "code": "equipos", "label": "Equipos" },
+        { "code": "estantes_mesas", "label": "Estantes y mesas" },
+        { "code": "personal", "label": "Personal *" },
+        { "code": "presencia_plagas", "label": "Presencia o signos de plagas" }
+      ] },
+      { "area": "Vestuarios", "items": [
+        { "code": "paredes_pisos_techo", "label": "Paredes, pisos, techo" },
+        { "code": "puertas_ventanas", "label": "Puertas y ventanas" },
+        { "code": "armario_lockers", "label": "Armario/lockers" },
+        { "code": "personal", "label": "Personal *" },
+        { "code": "presencia_plagas", "label": "Presencia o signos de plagas" }
+      ] },
+      { "area": "Oficina", "items": [
+        { "code": "paredes_pisos_techo", "label": "Paredes, pisos, techo" },
+        { "code": "puertas_ventanas", "label": "Puertas y ventanas" },
+        { "code": "estantes_escritorios_sillas", "label": "Estantes, escritorios, sillas, etc." },
+        { "code": "equipos", "label": "Equipos" },
+        { "code": "presencia_plagas", "label": "Presencia o signos de plagas" }
+      ] },
+      { "area": "Servicios Higiénicos", "items": [
+        { "code": "paredes", "label": "Paredes" },
+        { "code": "puertas_ventanas", "label": "Puertas y ventanas" },
+        { "code": "pisos", "label": "Pisos" },
+        { "code": "banos_lavatorios_duchas", "label": "Baños, lavatorios y duchas" }
+      ] },
+      { "area": "Utensilios de Limpieza", "items": [
+        { "code": "cartilla_colores", "label": "Según cartilla colores" },
+        { "code": "tachos_recipientes", "label": "Tachos y recipientes de basura" },
+        { "code": "limpieza_orden", "label": "Limpieza y orden" }
+      ] },
+      { "area": "Reservorio", "items": [
+        { "code": "tanque_1", "label": "Tanque N°01" },
+        { "code": "tanque_2", "label": "Tanque N°02" },
+        { "code": "tanque_3", "label": "Tanque N°03" }
+      ] }
+    ]
+  }
+]', true)
+ON CONFLICT (cooperative_id, step_key) DO UPDATE SET fields = EXCLUDED.fields, updated_at = now();
+
+-- Contenedor (CAES, venta nacional): fila cooperativa-específica del step
+-- "contenedor" con 4 campos opcionales en vez de obligatorios. Movida acá
+-- desde 20260913260000_contenedor_form_caes_nacional.sql por el mismo
+-- motivo que las anteriores; ya incluye "packing_list_numero", agregado
+-- después por 20260913270000_add_packing_list_numero_caes_nacional.sql.
+INSERT INTO "public"."form_configurations" ("cooperative_id", "step_key", "fields", "is_active") VALUES
+('550e8400-e29b-41d4-a716-446655440002', 'contenedor', '[
+  {"key":"container_number","label":"Serie de contenedor","type":"text","required":false,"order":1},
+  {"key":"seal_number","label":"Nro. Sello","type":"text","required":false,"order":2},
+  {"key":"precinto_aduana","label":"Precinto de aduana","type":"text","required":false,"order":3},
+  {"key":"container_size","label":"Tamaño (pies)","type":"select","required":false,"options":["20","40"],"default":"20","order":4},
+  {"key":"max_capacity_kg","label":"Capacidad máx. (kg)","type":"number","required":false,"min":0,"order":5},
+  {"key":"booking_number","label":"Nro. Reserva (Booking)","type":"text","required":false,"order":6},
+  {"key":"bill_of_lading","label":"Conocimiento de embarque (BL)","type":"text","required":false,"order":7},
+  {"key":"shipping_line","label":"Naviera","type":"text","required":false,"order":8},
+  {"key":"vessel","label":"Vessel","type":"text","required":false,"order":9},
+  {"key":"destination_port","label":"Puerto destino","type":"text","required":false,"order":10},
+  {"key":"departure_date","label":"Fecha de salida","type":"date","required":false,"order":11},
+  {"key":"estimated_arrival","label":"Fecha estimada de llegada","type":"date","required":false,"order":12},
+  {"key":"factura_comercial","label":"Factura Comercial","type":"text","required":false,"order":13},
+  {"key":"certificado_transaccion","label":"N° Certificado de Transacción (TC)","type":"text","required":false,"order":14},
+  {"key":"certificado_origen","label":"Certificado de Origen","type":"text","required":false,"order":15},
+  {"key":"carta_rendimiento_azucar","label":"Carta de Rendimiento del Azúcar","type":"text","required":false,"order":16},
+  {"key":"transporte_tramo1_codigo","label":"Transporte Montero → Paita/Piura: código de control","type":"text","required":false,"order":17},
+  {"key":"transporte_tramo1_fecha","label":"Transporte Montero → Paita/Piura: fecha","type":"date","required":false,"order":18},
+  {"key":"transporte_tramo1_guias","label":"Transporte Montero → Paita/Piura: N° guías de transporte (una por línea)","type":"textarea","required":false,"order":19},
+  {"key":"transporte_tramo2_codigo","label":"Transporte a destino final: código de control","type":"text","required":false,"order":20},
+  {"key":"transporte_tramo2_fecha","label":"Transporte a destino final: fecha","type":"date","required":false,"order":21},
+  {"key":"transporte_tramo2_guias","label":"Transporte a destino final: N° guías de transporte (una por línea)","type":"textarea","required":false,"order":22},
+  {"key":"packing_list_numero","label":"N° Packing List","type":"text","required":false,"order":23}
+]', true)
+ON CONFLICT (cooperative_id, step_key) DO UPDATE SET fields = EXCLUDED.fields, updated_at = now();
+
 RESET ALL;
